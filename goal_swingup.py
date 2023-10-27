@@ -6,10 +6,13 @@ from stable_baselines3 import SAC, HerReplayBuffer
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.env_checker import check_env
+
+import imageio
 
 from goal_pendulum import GoalPendulumEnv
 
-#env_id = "Pendulum-v1"
+env_id = "GoalPendulumEnv-v0"
 n_training_envs = 1
 n_eval_envs = 5
 
@@ -17,19 +20,36 @@ n_eval_envs = 5
 n_sampled_goal = 4
 
 # TODO replace with command line argument
+base_path = "./temp/pendulum/"
+fixed_eval = True
+if fixed_eval:
+    base_path = os.path.join(base_path, "dense_pendulum_eval")
+goal = "random"
+density = "dense"
+reward_type = "pendulum"
+steps = 10000
+options = goal + "_" + density + "_" + reward_type + "_" + str(steps)
+experiment = "exp1"
 
 # Create log dir
-log_dir = os.path.join("./runs/pendulum/", "goal/sparse/", "exp1", "train_logs")
+log_dir = os.path.join(base_path, options, experiment, "train_logs")
 os.makedirs(log_dir, exist_ok=True)
 
 # Initialize a vectorized training environment with default parameters
 #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0)
 #train_env = GoalPendulumEnv(render_mode="human")
-train_env = gym.make("GoalPendulumEnv-v0", reward_type="sparse")
+if goal == "fixed":
+    train_env = gym.make(env_id,
+                         reward_type=reward_type,
+                         reward_density=density,
+                         fixed_goal=np.array([1.0, 0.0, 0.0]),
+                         )
+else:
+    train_env = gym.make(env_id, reward_type=reward_type, reward_density=density)
 train_env = Monitor(train_env, log_dir)
 
 # Create log dir where evaluation results will be saved
-eval_log_dir = os.path.join("./runs/pendulum/", "goal/sparse/", "exp1", "eval_logs")
+eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
 os.makedirs(eval_log_dir, exist_ok=True)
 
 # Separate evaluation env, with different parameters passed via env_kwargs
@@ -37,10 +57,18 @@ os.makedirs(eval_log_dir, exist_ok=True)
 #eval_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0)
 #eval_env = GoalPendulumEnv(render_mode="human",
 #                           fixed_goal=np.array([1.0, 0.0, 0.0]))
-eval_env = gym.make("GoalPendulumEnv-v0",
-                    render_mode="human",
-                    fixed_goal=np.array([1.0, 0.0, 0.0]),
-                    reward_type="sparse")
+if fixed_eval:
+    eval_env = gym.make(env_id,
+                        render_mode="human",
+                        fixed_goal=np.array([1.0, 0.0, 0.0]),
+                        reward_type="pendulum",
+                        reward_density="dense")
+else:
+    eval_env = gym.make(env_id,
+                        render_mode="human",
+                        fixed_goal=np.array([1.0, 0.0, 0.0]),
+                        reward_type=reward_type,
+                        reward_density=density)
 eval_env = Monitor(eval_env, eval_log_dir)
 
 # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -55,14 +83,17 @@ eval_callback = EvalCallback(eval_env,
                              deterministic=True,
                              render=True)
 
+#check_env(train_env)
+
 model = SAC("MultiInputPolicy",
             train_env,
             replay_buffer_class=HerReplayBuffer,
             replay_buffer_kwargs=dict(
                 n_sampled_goal=n_sampled_goal,
                 goal_selection_strategy="future",
+                copy_info_dict=True,
             ),
-            learning_starts=500,
+            learning_starts=300,
             verbose=1,
             buffer_size=int(1e6),
             learning_rate=1e-3,
@@ -70,5 +101,50 @@ model = SAC("MultiInputPolicy",
             batch_size=256,
             policy_kwargs=dict(net_arch=[256, 256, 256]),
 )
-#model.learn(5000, callback=eval_callback, progress_bar=True)
-model.learn(100000, progress_bar=True)
+model.learn(steps, callback=eval_callback, progress_bar=True)
+#model.learn(5000, progress_bar=True)
+model_path = os.path.join(base_path, options, experiment, 'model')
+model.save(model_path)
+
+#model.load(model_path, eval_env)
+
+#model.set_env(eval_env)
+#obs, info = eval_env.reset()
+
+# Enjoy trained agent
+#print(obs)
+#for i in range(200):
+#    action, _states = model.predict(obs)
+#    obs, rewards, terms, trunks, infos = eval_env.step(action)
+#    eval_env.render()
+
+# images = []
+# img = model.env.render(mode='rgb_array')
+# for i in range(350):
+#     images.append(img)
+#     action, _ = model.predict(obs)
+#     obs, _, _ ,_ = model.env.step([action])
+#     img = model.env.render(mode='rgb_array')
+
+#imageio.mimsave('lander_a2c.gif', [np.array(img) for i, img in enumerate(images) if i%2 == 0], fps=29)
+
+# num = 1000
+
+# distances = []
+# rewards = []
+# for i in range(num):
+#     obs1, _ = train_env.reset()
+#     obs2, _ = train_env.reset()
+#     distance = np.linalg.norm((obs1["desired_goal"] - obs2["desired_goal"])/train_env.obs_norm, axis=-1)
+#     reward = np.exp(-distance)
+#     distances.append(distance)
+#     rewards.append(reward)
+
+# for res in [distances, rewards]:
+#     print(f"Mean: {np.mean(res)}")
+#     print(f"Std: {np.std(res)}")
+#     print(f"Median: {np.median(res)}")
+#     print(f"Min: {np.min(res)}")
+#     print(f"Max: {np.max(res)}")
+
+#     print(np.sort(res))
