@@ -76,11 +76,12 @@ class GoalPendulumEnv(PendulumEnv):
               options: Optional[dict] = None):
         super().reset(seed=seed, options=options)
         if self.harder_start:
-            pass
-            #high = [min(self.harder_start, 1)*DEFAULT_THETA]
-            #print(self.np_random.uniform(low=low, high=high))
-            #print(self.state)
-            #exit()
+            range = min(self.harder_start, 1)
+            high = range*DEFAULT_THETA
+            theta = self.np_random.uniform(low=0, high=high)
+            theta += DEFAULT_THETA-range
+            theta *= 1 if self.np_random.random() < 0.5 else -1
+            self.state[0] = theta
 
         # for now we generate the goals uniformly from the state space
         if self.fixed_goal is None:
@@ -110,7 +111,7 @@ class GoalPendulumEnv(PendulumEnv):
             else:
                 distance = np.linalg.norm(achieved_goal - desired_goal, axis=-1)
                 cutoff = 0.5
-                
+
             if self.reward_density == "dense":
                 return np.exp(-distance)
             elif self.reward_density == "sparse":

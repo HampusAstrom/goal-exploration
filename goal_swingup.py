@@ -30,6 +30,7 @@ reward_type = "pendulum"
 steps = 10000
 options = goal + "_" + density + "_" + reward_type + "_" + str(steps)
 experiment = "exp1"
+harder_start = 0.2
 
 # Create log dir
 log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -43,9 +44,13 @@ if goal == "fixed":
                          reward_type=reward_type,
                          reward_density=density,
                          fixed_goal=np.array([1.0, 0.0, 0.0]),
+                         harder_start=harder_start,
                          )
 else:
-    train_env = gym.make(env_id, reward_type=reward_type, reward_density=density)
+    train_env = gym.make(env_id,
+                         reward_type=reward_type,
+                         reward_density=density,
+                         harder_start=harder_start,)
 train_env = Monitor(train_env, log_dir)
 
 # Create log dir where evaluation results will be saved
@@ -61,12 +66,14 @@ if fixed_eval:
     eval_env = gym.make(env_id,
                         render_mode="human",
                         fixed_goal=np.array([1.0, 0.0, 0.0]),
+                        harder_start=harder_start,
                         reward_type="pendulum",
                         reward_density="dense")
 else:
     eval_env = gym.make(env_id,
                         render_mode="human",
                         fixed_goal=np.array([1.0, 0.0, 0.0]),
+                        harder_start=harder_start,
                         reward_type=reward_type,
                         reward_density=density)
 eval_env = Monitor(eval_env, eval_log_dir)
