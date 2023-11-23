@@ -21,6 +21,9 @@ def train(base_path: str = "./output/pendulum/hardstart/",
          steps: int = 10000,
          experiment: str = "exp1",
          harder_start: float = 0.2,
+         eval_seed: int = None,
+         train_seed: int = None,
+         policy_seed: int = None,
          ):
 
     env_id = "GoalPendulumEnv-v0"
@@ -33,7 +36,7 @@ def train(base_path: str = "./output/pendulum/hardstart/",
     # TODO replace with command line argument
     if fixed_eval:
         base_path = os.path.join(base_path, "truncated_pendulum_eval")
-    options = goal + "_" + density + "_" + reward_type + "_" + str(steps) + "steps_" + str(harder_start) + "hardstart"
+    options = goal + "_" + density + "_" + reward_type + "_" + str(steps) + "steps_" + str(harder_start) + "hardstart" + "_noHerReplay"
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -54,6 +57,8 @@ def train(base_path: str = "./output/pendulum/hardstart/",
                             reward_type=reward_type,
                             reward_density=density,
                             harder_start=harder_start,)
+    if train_seed is not None:
+        train_env.reset(seed=train_seed)
     train_env = Monitor(train_env, log_dir)
 
     # Create log dir where evaluation results will be saved
@@ -79,6 +84,8 @@ def train(base_path: str = "./output/pendulum/hardstart/",
                             harder_start=harder_start,
                             reward_type=reward_type,
                             reward_density=density)
+    if eval_seed is not None:
+        eval_env.reset(seed=eval_seed)
     eval_env = Monitor(eval_env, eval_log_dir)
 
     # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -95,21 +102,25 @@ def train(base_path: str = "./output/pendulum/hardstart/",
 
     #check_env(train_env)
 
+    # TODO change here from Her buffer or just run without
+    # without goal conditioning (but still truncated and hardstart)
+    # could hack compute reward but that is probably just confusing
     model = SAC("MultiInputPolicy",
                 train_env,
-                replay_buffer_class=HerReplayBuffer,
-                replay_buffer_kwargs=dict(
-                    n_sampled_goal=n_sampled_goal,
-                    goal_selection_strategy="future",
-                    copy_info_dict=True,
-                ),
+                # replay_buffer_class=HerReplayBuffer,
+                # replay_buffer_kwargs=dict(
+                #     n_sampled_goal=n_sampled_goal,
+                #     goal_selection_strategy="future",
+                #     copy_info_dict=True,
+                # ),
                 learning_starts=300,
                 verbose=1,
                 buffer_size=int(1e6),
                 learning_rate=1e-3,
                 gamma=0.95,
                 batch_size=256,
-                policy_kwargs=dict(net_arch=[256, 256, 256]),
+                policy_kwargs=dict(net_arch=[256, 256, 256],),
+                seed=policy_seed,
     )
     model.learn(steps, callback=eval_callback, progress_bar=True)
     #model.learn(5000, progress_bar=True)
@@ -160,16 +171,18 @@ def train(base_path: str = "./output/pendulum/hardstart/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    goal = ["fixed", "random",]
+    goal = ["fixed",] # ["fixed", "random",]
     density = ["truncated"] # ["truncated", "dense"]
     reward_type = ["pendulum"] # ["pendulum","genericnormed"]
-    harder_start = [0.1, 0.2, 0.5, 1]
+    harder_start = [0.1, 0.2, 0.5, 1] # [0.1, 0.2, 0.5, 1]
+    experiments = ["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     
-    for conf in product(goal, density, reward_type, harder_start):
+    for conf in product(goal, density, reward_type, harder_start, experiments):
         train(goal=conf[0],
               density=conf[1],
               reward_type=conf[2],
               harder_start=conf[3],
-              experiment="exp3",
+              experiment=conf[4],
+              steps=20000,
               )
         print(conf[0]+conf[1]+conf[2]+str(conf[3]))

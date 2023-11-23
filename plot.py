@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 import os
 
 # current selection
@@ -31,18 +32,20 @@ import os
 #              "b-.",
 #              ]
 
+matplotlib.rcParams.update({'font.size': 18})
+
 from itertools import product
 
 goal = ["fixed", "random",]
 density = ["truncated"] # ["truncated", "dense"]
 reward_type = ["pendulum"] # ["pendulum","genericnormed"]
 harder_start = [0.1, 0.2, 0.5, 1] # [0.1, 0.2, 0.5, 1]
-experiments = ["exp1", "exp2", "exp3"]
+experiments = ["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8",]
 
 lineparts = product(["-", ":", "-", "-."], ["r", "g", "c", "b"]) # ["--", ":", "-", "-."], ["r", "y", "g", "b"]
 colors = ["r", "g", "c", "b"]*4
 linestyles = [x[0]+x[1] for x in lineparts]
-skips = [0, 0, 1, 0, 0, 0, 1, 0]
+skips = [0, 0, 0, 0, 0, 0, 0, 0]
 #skips = [x == 1 for x in skips]
 
 print(colors)
@@ -56,8 +59,15 @@ for conf in product(goal, density, reward_type, harder_start):
     steps = 20000
     # experiment = "exp1"
     exp_set = []
-    options = goals + "_" + densitys + "_" + reward_types + "_" + str(steps) + "steps_" + str(harder_starts) + "hardstart"
-    short_options = str(harder_starts) + " easyness " + goals + " goal"
+    extra = ""
+    # if goals == "fixed": # override for no hindsight 
+    #     extra = "_noHerReplay"
+    options = goals + "_" + densitys + "_" + reward_types + "_" + str(steps) + "steps_" + str(harder_starts) + "hardstart" + extra
+    if goals == "fixed":
+        goals = "fixed goal selection + hindsight"
+    else:
+        goals = "random goal selection + hindsight"
+    short_options = str(float(harder_starts)) + " start, " + goals #+ " goal"
     for experiment in experiments:
         eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
         exp_set.append(eval_log_dir)
@@ -83,10 +93,14 @@ for path, label, linestyle, color, skip in zip(paths, labels, linestyles, colors
     std = np.std(datas, axis=0)
     avg_data = np.convolve(data, [1]*window, 'valid')/window
     avg_std = np.convolve(std, [1]*window, 'valid')/window
-    x = range(len(avg_data))
+    #x = range(len(avg_data))
+    x = np.linspace(0, 20000, len(avg_data))
     ax.plot(x, avg_data, linestyle, label=label)
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03, facecolor=color)
 
 ax.legend()
+ax.set_xlabel("steps")
+ax.set_ylabel("reward")
+ax.set_ylim(-410, 0)
 fig.tight_layout()
-plt.savefig("compare_goal_trunc_pen_trunc_eval_test")
+plt.savefig("compare_goal_trunc_pen_trunc_eval_all")
