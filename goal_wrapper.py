@@ -3,7 +3,8 @@ import numpy as np
 
 from gymnasium import error, logger
 from gymnasium.core import ActType, ObsType
-from gymnasium.spaces.utils import flatten
+from gymnasium.spaces.utils import flatten, flatdim
+from gymnasium import spaces
 
 
 # lets make a non-vecotrized version first
@@ -29,7 +30,7 @@ class GoalWrapper(
 
         self.intrinsic_weight = intrinsic_weight
         # for now this only supports flattenable observation spaces
-        assert self.env.observation_space().is_np_flattenable()
+        assert self.env.observation_space.is_np_flattenable
         # TODO this supports inputing a reward function from the outside, but we should
         # proabaly also support selecting different strategies in this code with sting arguments
         if reward_func is None:
@@ -41,6 +42,15 @@ class GoalWrapper(
         else:
             self.select_goal = goal_selection_strat
 
+        new_observation_space = spaces.Dict({"observation": self.env.observation_space,
+                                             "achieved_goal": self.env.observation_space,
+                                             "desired_goal": self.env.observation_space})
+
+        # TODO determine if I should replace this with inheriting TransformObservation
+        # and calling its constructor here
+        # If so I should probably do the same for reward
+        self.observation_space = new_observation_space
+
     def step(
             self,
             action
@@ -49,7 +59,7 @@ class GoalWrapper(
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         # get goal conditioned reward
-        inreward = self.compute_reward(obs, self.goal)
+        inreward = self.compute_reward(obs, self.goal, info)
         iw = self.intrinsic_weight
         # output weighted average of rewards
         totreward = iw*inreward + (1-iw)*reward
@@ -62,14 +72,14 @@ class GoalWrapper(
 
         return self._get_obs(obs), totreward, terminated, truncated, info
 
-    def reset(self, **kvargs):
+    def reset(self, **kwargs):
         obs, reset_info = self.env.reset(**kwargs)
         self.goal = self.select_goal()
 
         return self._get_obs(obs), reset_info
 
     def sample_obs_goal(self):
-        obs_space = self.env.observation_space()
+        obs_space = self.env.observation_space
         
         # first trivial goal selection (uniform/default in obs space)
         return obs_space.sample()
@@ -82,13 +92,17 @@ class GoalWrapper(
     def flatten_norm_reward(self,
                        achieved_goal,
                        desired_goal,
+                       info,
                        ):
         # TODO we need to handle all types of obs spaces here to be able to compare
         # and check "distance" from goal. For now requires flattenable space
         # in the future it should also be possible to give weights to certain dimensions
         # especially by normalizing it by the size of each obs space component
-        flat_achi = flatten(self.env.observation_space(), achieved_goal)
-        flat_goal = flatten(self.env.observation_space(), desired_goal)
+        flat_achi = flatten(self.env.observation_space, achieved_goal)
+        flat_goal = flatten(self.env.observation_space, desired_goal)
+        if achieved_goal.ndim == 2: # handle batch
+            flat_achi = flat_achi.reshape(-1, 3)
+            flat_goal = flat_goal.reshape(-1, 3)
         distance = np.linalg.norm(flat_achi - flat_goal, axis=-1) # TODO not sure about axis here
         # for now returning dense reward, hard to extimate generic cutoff value
         return np.exp(-distance)
