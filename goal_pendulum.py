@@ -103,7 +103,9 @@ class GoalPendulumEnv(PendulumEnv):
 
     def compute_reward(self, 
                        achieved_goal: np.ndarray, 
-                       desired_goal: np.ndarray, info: dict) -> float:
+                       desired_goal: np.ndarray,
+                       info: dict
+                       ) -> float:
         if self.reward_type == "generic" or self.reward_type == "genericnormed":
             if self.reward_type == "genericnormed":
                 distance = np.linalg.norm((achieved_goal - desired_goal)/self.obs_norm, axis=-1)
