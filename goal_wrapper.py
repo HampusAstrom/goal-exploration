@@ -50,6 +50,7 @@ class GoalWrapper(
         # and calling its constructor here
         # If so I should probably do the same for reward
         self.observation_space = new_observation_space
+        self.goal_dim = flatdim(self.observation_space["desired_goal"])
 
     def step(
             self,
@@ -101,8 +102,8 @@ class GoalWrapper(
         flat_achi = flatten(self.env.observation_space, achieved_goal)
         flat_goal = flatten(self.env.observation_space, desired_goal)
         if achieved_goal.ndim == 2: # handle batch
-            flat_achi = flat_achi.reshape(-1, 3)
-            flat_goal = flat_goal.reshape(-1, 3)
+            flat_achi = flat_achi.reshape(-1, self.goal_dim)
+            flat_goal = flat_goal.reshape(-1, self.goal_dim)
         distance = np.linalg.norm(flat_achi - flat_goal, axis=-1) # TODO not sure about axis here
         # for now returning dense reward, hard to extimate generic cutoff value
         return np.exp(-distance)
