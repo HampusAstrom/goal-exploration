@@ -14,22 +14,23 @@ import imageio
 
 from goal_wrapper import GoalWrapper
 
-def train(base_path: str = "./output/wrapper/pendulum/",
+def train(base_path: str = "./temp/wrapper/pendulum/",
           steps: int = 10000,
           experiment: str = "exp1",
+          intrinsic_weight: float = 0.5,
           eval_seed: int = None,
           train_seed: int = None,
           policy_seed: int = None,
          ):
 
-    env_id = "Pendulum-v1"
+    env_id = "Pendulum-v1" # "MountainCarContinuous-v0"
     n_training_envs = 1
     n_eval_envs = 5
 
     # Create 4 artificial transitions per real transition
     n_sampled_goal = 4
 
-    options = str(steps) + "steps"
+    options = str(steps) + "steps_" + str(intrinsic_weight) + "inrewardweight"
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -41,7 +42,7 @@ def train(base_path: str = "./output/wrapper/pendulum/",
         train_env.reset(seed=train_seed)
 
     # wrap with goal conditioning and monitor wrappers
-    train_env = GoalWrapper(train_env)
+    train_env = GoalWrapper(train_env, intrinsic_weight=intrinsic_weight)
     train_env = Monitor(train_env, log_dir)
 
     # Create log dir where evaluation results will be saved
@@ -57,7 +58,7 @@ def train(base_path: str = "./output/wrapper/pendulum/",
                         render_mode="human")
     if eval_seed is not None:
         eval_env.reset(seed=eval_seed)
-    eval_env = GoalWrapper(eval_env)
+    eval_env = GoalWrapper(eval_env, intrinsic_weight=intrinsic_weight)
     eval_env = Monitor(eval_env, eval_log_dir)
 
     # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -148,5 +149,6 @@ if __name__ == '__main__':
     for conf in product(experiments):
         train(experiment=conf[0],
               steps=20000,
+              intrinsic_weight=1.0,
               )
         print(conf)
