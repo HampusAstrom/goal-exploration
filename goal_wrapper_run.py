@@ -54,8 +54,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     #eval_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0)
     #eval_env = GoalPendulumEnv(render_mode="human",
     #                           fixed_goal=np.array([1.0, 0.0, 0.0]))
-    eval_env = gym.make(env_id,
-                        render_mode="human")
+    eval_env = gym.make(env_id)#,render_mode="human")
     if eval_seed is not None:
         eval_env.reset(seed=eval_seed)
     eval_env = GoalWrapper(eval_env, intrinsic_weight=intrinsic_weight)
@@ -94,9 +93,10 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
                 batch_size=256,
                 policy_kwargs=dict(net_arch=[256, 256, 256],),
                 seed=policy_seed,
+                device="cuda",
     )
     model.learn(steps, callback=eval_callback, progress_bar=True)
-    #model.learn(5000, progress_bar=True)
+    #model.learn(steps, progress_bar=True)
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
 

@@ -72,14 +72,14 @@ def train(base_path: str = "./output/pendulum/hardstart/",
     #                           fixed_goal=np.array([1.0, 0.0, 0.0]))
     if fixed_eval:
         eval_env = gym.make(env_id,
-                            render_mode="human",
+                            #render_mode="human",
                             fixed_goal=np.array([1.0, 0.0, 0.0]),
                             harder_start=harder_start,
                             reward_type="pendulum",
                             reward_density="truncated")
     else:
         eval_env = gym.make(env_id,
-                            render_mode="human",
+                            #render_mode="human",
                             fixed_goal=np.array([1.0, 0.0, 0.0]),
                             harder_start=harder_start,
                             reward_type=reward_type,
@@ -121,6 +121,7 @@ def train(base_path: str = "./output/pendulum/hardstart/",
                 batch_size=256,
                 policy_kwargs=dict(net_arch=[256, 256, 256],),
                 seed=policy_seed,
+                device="cuda",
     )
     model.learn(steps, callback=eval_callback, progress_bar=True)
     #model.learn(5000, progress_bar=True)
