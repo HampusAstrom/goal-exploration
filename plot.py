@@ -48,15 +48,36 @@ linestyles = [x[0]+x[1] for x in lineparts]
 skips = [0, 0, 0, 0, 0, 0, 0, 0]
 #skips = [x == 1 for x in skips]
 
+steps = 20000
+
 print(colors)
 print(linestyles)
+
+def add_subplot(paths, labels, linestyles, colors, skips, endx, window, ax):
+    for path, label, linestyle, color, skip in zip(paths, labels, linestyles, colors, skips):
+        if skip:
+            continue
+        datas = []
+        for exp in path:
+            data = np.loadtxt(os.path.join(exp, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+            #avg_data = np.convolve(data, [1]*window, 'valid')/window
+            datas.append(data)
+        #avg_data = np.mean(datas, axis=0)
+        #avg_std = np.std(datas, axis=0)
+        data = np.mean(datas, axis=0)
+        std = np.std(datas, axis=0)
+        avg_data = np.convolve(data, [1]*window, 'valid')/window
+        avg_std = np.convolve(std, [1]*window, 'valid')/window
+        #x = range(len(avg_data))
+        x = np.linspace(0, endx, len(avg_data))
+        ax.plot(x, avg_data, linestyle, label=label)
+        ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03, facecolor=color)
 
 paths = []
 labels = []
 base_path = "./output/pendulum/hardstart/truncated_pendulum_eval/"
 for conf in product(goal, density, reward_type, harder_start):
     (goals, densitys, reward_types, harder_starts)=conf
-    steps = 20000
     # experiment = "exp1"
     exp_set = []
     extra = ""
@@ -79,28 +100,11 @@ for conf in product(goal, density, reward_type, harder_start):
 px = 1/plt.rcParams['figure.dpi']
 fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
 window = 10
-for path, label, linestyle, color, skip in zip(paths, labels, linestyles, colors, skips):
-    if skip:
-        continue
-    datas = []
-    for exp in path:
-        data = np.loadtxt(os.path.join(exp, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
-        #avg_data = np.convolve(data, [1]*window, 'valid')/window
-        datas.append(data)
-    #avg_data = np.mean(datas, axis=0)
-    #avg_std = np.std(datas, axis=0)
-    data = np.mean(datas, axis=0)
-    std = np.std(datas, axis=0)
-    avg_data = np.convolve(data, [1]*window, 'valid')/window
-    avg_std = np.convolve(std, [1]*window, 'valid')/window
-    #x = range(len(avg_data))
-    x = np.linspace(0, 20000, len(avg_data))
-    ax.plot(x, avg_data, linestyle, label=label)
-    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03, facecolor=color)
+add_subplot(paths, labels, linestyles, colors, skips, steps, window, ax)
 
 ax.legend()
 ax.set_xlabel("steps")
 ax.set_ylabel("reward")
-ax.set_ylim(-410, 0)
+#ax.set_ylim(-410, 0)
 fig.tight_layout()
-plt.savefig("compare_goal_trunc_pen_trunc_eval_all")
+plt.savefig("test")

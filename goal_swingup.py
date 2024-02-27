@@ -13,7 +13,7 @@ import imageio
 
 from goal_pendulum import GoalPendulumEnv
 
-def train(base_path: str = "./output/pendulum/hardstart/",
+def train(base_path: str = "./temp/pendulum/",
          fixed_eval: bool = True,
          goal: str = "random",
          density: str = "dense",
@@ -35,7 +35,7 @@ def train(base_path: str = "./output/pendulum/hardstart/",
 
     # TODO replace with command line argument
     if fixed_eval:
-        base_path = os.path.join(base_path, "truncated_pendulum_eval")
+        base_path = os.path.join(base_path, "dense_generic_eval")
     options = goal + "_" + density + "_" + reward_type + "_" + str(steps) + "steps_" + str(harder_start) + "hardstart" + "_noHerReplay"
 
     # Create log dir
@@ -75,8 +75,8 @@ def train(base_path: str = "./output/pendulum/hardstart/",
                             #render_mode="human",
                             fixed_goal=np.array([1.0, 0.0, 0.0]),
                             harder_start=harder_start,
-                            reward_type="pendulum",
-                            reward_density="truncated")
+                            reward_type="generic",
+                            reward_density="dense")
     else:
         eval_env = gym.make(env_id,
                             #render_mode="human",
@@ -172,10 +172,10 @@ def train(base_path: str = "./output/pendulum/hardstart/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    goal = ["fixed",] # ["fixed", "random",]
-    density = ["truncated"] # ["truncated", "dense"]
-    reward_type = ["pendulum"] # ["pendulum","genericnormed"]
-    harder_start = [0.1, 0.2, 0.5, 1] # [0.1, 0.2, 0.5, 1]
+    goal = ["random",] # ["fixed", "random",]
+    density = ["dense"] # ["truncated", "dense"]
+    reward_type = ["generic"] # ["pendulum","genericnormed"]
+    harder_start = [1] # [0.1, 0.2, 0.5, 1]
     experiments = ["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     
     for conf in product(goal, density, reward_type, harder_start, experiments):
@@ -185,5 +185,6 @@ if __name__ == '__main__':
               harder_start=conf[3],
               experiment=conf[4],
               steps=20000,
+              fixed_eval=False,
               )
         print(conf[0]+conf[1]+conf[2]+str(conf[3]))

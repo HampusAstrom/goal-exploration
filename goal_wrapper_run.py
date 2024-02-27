@@ -8,9 +8,11 @@ from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
-import imageio
+#import imageio
+
+import time
 
 from goal_wrapper import GoalWrapper
 
@@ -21,6 +23,8 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
           eval_seed: int = None,
           train_seed: int = None,
           policy_seed: int = None,
+          fixed_goal_fraction = 0.0,
+          device = None,
          ):
 
     env_id = "Pendulum-v1" # "MountainCarContinuous-v0"
@@ -30,20 +34,28 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # Create 4 artificial transitions per real transition
     n_sampled_goal = 4
 
-    options = str(steps) + "steps_" + str(intrinsic_weight) + "inrewardweight"
+    options = str(steps) + "steps_" + str(intrinsic_weight) + "inrewardWeight_" + str(fixed_goal_fraction) + "fixedGoalFraction"
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
     os.makedirs(log_dir, exist_ok=True)
 
     # Initialize a training environment with default parameters
+    #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0, vec_env_cls=SubprocVecEnv)
     train_env = gym.make(env_id)
     if train_seed is not None:
         train_env.reset(seed=train_seed)
 
     # wrap with goal conditioning and monitor wrappers
-    train_env = GoalWrapper(train_env, intrinsic_weight=intrinsic_weight)
-    train_env = Monitor(train_env, log_dir)
+    train_env_goal = GoalWrapper(train_env, intrinsic_weight=intrinsic_weight)
+    train_env = Monitor(train_env_goal, log_dir)
+    #train_env = VecMonitor(train_env, log_dir)
+
+    fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
+    goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
+    goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
+    train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
+    train_env_goal.print_setup()
 
     # Create log dir where evaluation results will be saved
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
@@ -57,7 +69,10 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     eval_env = gym.make(env_id)#,render_mode="human")
     if eval_seed is not None:
         eval_env.reset(seed=eval_seed)
-    eval_env = GoalWrapper(eval_env, intrinsic_weight=intrinsic_weight)
+    # for eval we want to always evaluate with the goal at the top
+    # if weight should be 0 (using real reward, or 1 using goal reward, or a mixture like
+    # in training can be discussed)
+    eval_env = GoalWrapper(eval_env, intrinsic_weight=1, goal_selection_strategies=fixed_goal)
     eval_env = Monitor(eval_env, eval_log_dir)
 
     # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -93,9 +108,11 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
                 batch_size=256,
                 policy_kwargs=dict(net_arch=[256, 256, 256],),
                 seed=policy_seed,
-                device="cuda",
+                device=device,
     )
+    start_time = time.time()
     model.learn(steps, callback=eval_callback, progress_bar=True)
+    print("--- %s seconds ---" % (time.time() - start_time))
     #model.learn(steps, progress_bar=True)
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
@@ -144,11 +161,15 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["exp1",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
+    #device = ["cpu", "cuda"]
     
-    for conf in product(experiments):
-        train(experiment=conf[0],
+    for conf in product(fixed_goal_fractions, experiments):
+        print("Training with configuration: " + str(conf))
+        train(fixed_goal_fraction = conf[0],
+              experiment=conf[1],
               steps=20000,
               intrinsic_weight=1.0,
+              device="cuda"
               )
-        print(conf)
