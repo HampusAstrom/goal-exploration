@@ -192,7 +192,7 @@ if __name__ == '__main__':
     experiments = ["test",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
-    
+
     for conf in product(fixed_goal_fractions, experiments):
         print("Training with configuration: " + str(conf))
         train(fixed_goal_fraction = conf[0],

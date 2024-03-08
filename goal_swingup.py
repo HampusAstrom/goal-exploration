@@ -177,7 +177,7 @@ if __name__ == '__main__':
     reward_type = ["generic"] # ["pendulum","genericnormed"]
     harder_start = [1] # [0.1, 0.2, 0.5, 1]
     experiments = ["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
-    
+
     for conf in product(goal, density, reward_type, harder_start, experiments):
         train(goal=conf[0],
               density=conf[1],

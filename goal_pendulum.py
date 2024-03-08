@@ -1,4 +1,4 @@
-__credits__ = ["Hampus Åström"] 
+__credits__ = ["Hampus Åström"]
 
 from typing import Optional
 from collections import OrderedDict
@@ -25,8 +25,8 @@ DEFAULT_THETA = np.pi
 DEFAULT_THETADOT = 1.0
 
 class GoalPendulumEnv(PendulumEnv):
-    
-    def __init__(self, 
+
+    def __init__(self,
                  render_mode: Optional[str] = None,
                  reward_type: str = "generic",
                  reward_density: str = "dense",
@@ -50,7 +50,7 @@ class GoalPendulumEnv(PendulumEnv):
         reward_density = reward_density.lower()
         assert reward_density in {"dense", "sparse", "truncated"}
         self.reward_density = reward_density
-        
+
         self.goal = None
         # TODO verify input of fixed goal
         self.fixed_goal = fixed_goal
@@ -70,9 +70,9 @@ class GoalPendulumEnv(PendulumEnv):
         #    ("desired_goal", goal),
         #])
         return {"observation": obs, "achieved_goal": obs, "desired_goal": goal}
-    
-    def reset(self, *, 
-              seed: Optional[int] = None, 
+
+    def reset(self, *,
+              seed: Optional[int] = None,
               options: Optional[dict] = None):
         super().reset(seed=seed, options=options)
         if self.harder_start:
@@ -101,8 +101,8 @@ class GoalPendulumEnv(PendulumEnv):
         # trunkate after 200 steps
         return obs, reward, term, trunk, info
 
-    def compute_reward(self, 
-                       achieved_goal: np.ndarray, 
+    def compute_reward(self,
+                       achieved_goal: np.ndarray,
                        desired_goal: np.ndarray,
                        info: dict
                        ) -> float:
@@ -154,6 +154,6 @@ class GoalPendulumEnv(PendulumEnv):
                     else:
                         return -2
                 # cost jump to platau to make rewards sparse but retain fine tuning
-                
+
     def get_angle(self,obs):
         return angle_normalize(np.arctan2(obs[...,1], obs[...,0]))

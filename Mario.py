@@ -9,12 +9,12 @@ def Mario(state,action):
     done=False
     grad_info = action
     state_new= np.minimum(1.0,np.maximum(0,state+action))
-    
+
     if (state+action)<0:
         reward = 1
     else:
         reward = 0
-    
+
     # Used the  additional part given below
     if state_new ==0.0:
        done = True
@@ -22,4 +22,3 @@ def Mario(state,action):
     # Reward for one step
     Reward_aggre = reward
     return np.array(state_new), Reward_aggre, done
-    

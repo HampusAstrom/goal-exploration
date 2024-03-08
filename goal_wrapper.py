@@ -106,7 +106,7 @@ class GoalWrapper(
         return self._get_obs(obs), reset_info
 
     def _get_obs(self, obs):
-        # current version assumes goals in obs space, expand this when that is not 
+        # current version assumes goals in obs space, expand this when that is not
         # always the case anymore
         return {"observation": obs, "achieved_goal": obs, "desired_goal": self.goal}
 
@@ -131,7 +131,7 @@ class GoalWrapper(
 
     def sample_obs_goal(self, obs = None):
         obs_space = self.env.observation_space
-        
+
         # first trivial goal selection (uniform/default in obs space)
         return obs_space.sample()
 

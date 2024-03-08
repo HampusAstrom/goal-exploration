@@ -81,7 +81,7 @@ for conf in product(goal, density, reward_type, harder_start):
     # experiment = "exp1"
     exp_set = []
     extra = ""
-    # if goals == "fixed": # override for no hindsight 
+    # if goals == "fixed": # override for no hindsight
     #     extra = "_noHerReplay"
     options = goals + "_" + densitys + "_" + reward_types + "_" + str(steps) + "steps_" + str(harder_starts) + "hardstart" + extra
     if goals == "fixed":
