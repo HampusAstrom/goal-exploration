@@ -1,6 +1,7 @@
 import os
 import gymnasium as gym
 import numpy as np
+import matplotlib.pyplot as plt
 from itertools import product
 
 from stable_baselines3 import SAC, HerReplayBuffer
@@ -52,7 +53,8 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     #train_env = VecMonitor(train_env, log_dir)
 
     fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
-    goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
+    #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
+    goal_selection_strategies = [train_env_goal.select_goal_for_coverage, fixed_goal]
     goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
     train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
     train_env_goal.print_setup()
@@ -110,12 +112,38 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
                 seed=policy_seed,
                 device=device,
     )
+    # TODO a smart goal selection needs access to buffer of seen states and of targeted goals
+    # policy algorithm can be mostly separate, but we should link up with its buffer when it exists
+    # and create one otherwise. We should therefore set goal strategy here after model is setup I guess
+    # removes some nice separation, but is maybe ok for now?
+    # Also, when we replace the set of all seen states with a downsamples proxy, this might be more clear
+
     start_time = time.time()
     model.learn(steps, callback=eval_callback, progress_bar=True)
     print("--- %s seconds ---" % (time.time() - start_time))
     #model.learn(steps, progress_bar=True)
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
+
+    targeted_goals = np.stack(train_env_goal.targeted_goals)
+    print(targeted_goals)
+    fig = plt.figure()
+    ax = fig.add_subplot(221)
+    ax.plot(targeted_goals[:,0], targeted_goals[:,1], "o")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax = fig.add_subplot(222)
+    ax.plot(targeted_goals[:,0], targeted_goals[:,2], "o")
+    ax.set_xlabel("x")
+    ax.set_ylabel("angular speed")
+    ax = fig.add_subplot(223)
+    ax.plot(targeted_goals[:,1], targeted_goals[:,2], "o"   )
+    ax.set_xlabel("y")
+    ax.set_ylabel("angular speed")
+    plt.tight_layout()
+    plt.savefig(os.path.join(base_path, options, experiment,"goal_spread"))
+    np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
+
 
 #model.load(model_path, eval_env)
 
@@ -161,7 +189,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["exp1",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["test",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
     

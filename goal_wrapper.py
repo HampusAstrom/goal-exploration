@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import scipy
 
 from gymnasium import error, logger
 from gymnasium.core import ActType, ObsType
@@ -67,6 +68,12 @@ class GoalWrapper(
         self.observation_space = new_observation_space
         self.goal_dim = flatdim(self.observation_space["desired_goal"])
 
+        # create variables that track seen and targeted goals
+        # seen goals can maybe just we replay buffer from policy algorithm
+        # TODO replace with flexible solution
+        self.seen_goals = []
+        self.targeted_goals = []
+
     def step(
             self,
             action
@@ -86,11 +93,15 @@ class GoalWrapper(
         info["exreward"] = reward
         info["inreward"] = inreward
 
+        self.seen_goals.append(obs)
+
         return self._get_obs(obs), totreward, terminated, truncated, info
 
     def reset(self, **kwargs):
         obs, reset_info = self.env.reset(**kwargs)
         self.goal = self.select_goal(obs) # goal selection can require obs info
+
+        self.targeted_goals.append(self.goal)
 
         return self._get_obs(obs), reset_info
 
@@ -147,4 +158,33 @@ class GoalWrapper(
         # for now returning dense reward, hard to extimate generic cutoff value
         return np.exp(-distance)
 
+    def select_goal_for_coverage(self, obs):
+        # this temporary goal selection stratefy only tries to cover the space with
+        # seen and targeted goals, to be improved later
+        num_cand = 10
 
+        # first goal is random
+        if len(self.targeted_goals) < 1:
+            return self.sample_obs_goal(obs)
+
+        # TODO optimize this
+
+        # make matrix of previous (seen and targeted) goals
+        prev = np.stack(self.seen_goals + self.targeted_goals)
+
+        # make matrix of candidate points
+        candidate_points = np.stack([self.env.observation_space.sample() for i in range(num_cand)])
+
+        # TODO normalize so that each dimension matters as much, with obs space size
+        # or actual values seen in data?
+
+        # calc distance between each candidate and each previous goals
+        dist = scipy.spatial.distance.cdist(prev,candidate_points)
+
+        # select candidate that is most "alone". This could be the one who's
+        # closest neighbor is the furthest away for now.
+        min_per_cand = np.min(dist, 0)
+        ind = np.argmax(min_per_cand)
+        best_cand = candidate_points[ind]
+
+        return best_cand
