@@ -125,6 +125,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
 
+    # TODO move plots to dedicated file
     targeted_goals = np.stack(train_env_goal.targeted_goals)
     print(targeted_goals)
     fig = plt.figure()
@@ -189,7 +190,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["test",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["test4",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
 

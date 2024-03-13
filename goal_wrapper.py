@@ -6,7 +6,7 @@ from gymnasium import error, logger
 from gymnasium.core import ActType, ObsType
 from gymnasium.spaces.utils import flatten, flatdim
 from gymnasium import spaces
-
+import utils
 
 # TODO make class? for submitting multiple goal selection strategies with weights for each
 # to be used a fraction of the time in proportion to the weight
@@ -158,33 +158,94 @@ class GoalWrapper(
         # for now returning dense reward, hard to extimate generic cutoff value
         return np.exp(-distance)
 
+    def norm_each_dim(self, array):
+        # normalizes each sample in array to be on the range of 0-1 in each dimension
+        # does not work for inf dims...
+        # TODO replace with norm that matches sampling strategy for
+        # bounded/unbounded in https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/spaces/box.py
+        low = self.env.observation_space.low
+        high = self.env.observation_space.high
+        ret = (array - low)/(high - low)
+        return ret
+
+    @staticmethod
+    def goldilocks(dists):
+        # assumes normalized dimensions
+        # TODO we should calc what "optimal distance" these parameters imply
+        # and set the parameters so that it is 1 at it's maximum for tuning
+        # and both/either make them tunable or adapt on their own based on experience
+        alpha = 4
+        temp = dists - alpha * dists**2
+        return np.maximum(dists - alpha * dists**2, 0)
+
     def select_goal_for_coverage(self, obs):
         # this temporary goal selection stratefy only tries to cover the space with
         # seen and targeted goals, to be improved later
         num_cand = 10
+        experiment_w = 1
+        expand_w = 1
+        exclude_w = 2
+        explain_w = 1
+        explit_w = 1
 
         # first goal is random
         if len(self.targeted_goals) < 1:
             return self.sample_obs_goal(obs)
 
+        # TODO determine if we need to flatten stuff here too for the general case
         # TODO optimize this
-
-        # make matrix of previous (seen and targeted) goals
-        prev = np.stack(self.seen_goals + self.targeted_goals)
+        # TODO mock data and make testcase to verify each component and result
 
         # make matrix of candidate points
         candidate_points = np.stack([self.env.observation_space.sample() for i in range(num_cand)])
 
-        # TODO normalize so that each dimension matters as much, with obs space size
-        # or actual values seen in data?
+        # normalize so that each dimension matters as much with obs space size
+        # TODO or actual values seen in data?
+        n_candidate_points = self.norm_each_dim(candidate_points)
+        seen_goals = self.norm_each_dim(self.seen_goals)
+        targeted_goals = self.norm_each_dim(self.targeted_goals)
 
         # calc distance between each candidate and each previous goals
-        dist = scipy.spatial.distance.cdist(prev,candidate_points)
+        seen_dists = scipy.spatial.distance.cdist(seen_goals,n_candidate_points)
+        targeted_dists = scipy.spatial.distance.cdist(targeted_goals,n_candidate_points)
+        all_dists = np.concatenate((seen_dists, targeted_dists))
 
+        # select components to care about it not all at all times
+
+        # get experiment component
         # select candidate that is most "alone". This could be the one who's
         # closest neighbor is the furthest away for now.
-        min_per_cand = np.min(dist, 0)
-        ind = np.argmax(min_per_cand)
+        min_dist_to_any = np.min(all_dists, 0)
+
+        # get expand (goldilocks) component
+        min_dist_to_seen = np.min(seen_dists, 0)
+        goldilocks = self.goldilocks(min_dist_to_seen)
+
+        # get exclude component
+        # TODO discount exclusion over time
+        targeted2seen_dists = scipy.spatial.distance.cdist(seen_goals,targeted_goals)
+        exclusion_sizes = np.min(targeted2seen_dists, 0)
+        exclusion_per_target = - np.maximum(1-targeted_dists/exclusion_sizes[:, None], 0)
+        exclusion_contrib = np.sum(exclusion_per_target, 0)
+
+        # TODO get explain component
+
+        # TODO get exploit component
+
+        # compine components and select best candidate
+        # TODO add new components
+        total_goal_val = experiment_w * min_dist_to_any \
+                       + expand_w * goldilocks \
+                       + exclude_w * exclusion_contrib
+
+        print(experiment_w * min_dist_to_any)
+        print(expand_w * goldilocks)
+        print(exclude_w * exclusion_contrib)
+        print(total_goal_val)
+        print(np.max(total_goal_val))
+        print()
+        # select cantidate with highest weight and return its goal
+        ind = np.argmax(total_goal_val)
         best_cand = candidate_points[ind]
 
         return best_cand
