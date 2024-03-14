@@ -71,8 +71,9 @@ class GoalWrapper(
         # create variables that track seen and targeted goals
         # seen goals can maybe just we replay buffer from policy algorithm
         # TODO replace with flexible solution
-        self.seen_goals = []
+        #self.seen_goals = []
         self.targeted_goals = []
+        self.components_for_candidates = []
 
     def step(
             self,
@@ -93,7 +94,7 @@ class GoalWrapper(
         info["exreward"] = reward
         info["inreward"] = inreward
 
-        self.seen_goals.append(obs)
+        #self.seen_goals.append(obs)
 
         return self._get_obs(obs), totreward, terminated, truncated, info
 
@@ -108,6 +109,8 @@ class GoalWrapper(
     def _get_obs(self, obs):
         # current version assumes goals in obs space, expand this when that is not
         # always the case anymore
+        # maybe make a check on class creation and skipp "achieved_goal" when
+        # same as regular obs, for efficent memory usage
         return {"observation": obs, "achieved_goal": obs, "desired_goal": self.goal}
 
     def set_goal_strategies(self, goal_selection_strategies, goal_sel_strat_weight=None):
@@ -118,6 +121,9 @@ class GoalWrapper(
         else:
             self.strat_weights = goal_sel_strat_weight
         self.select_goal = self.multi_strat_goal_selection
+
+    def link_buffer(self, buffer):
+        self.replay_buffer = buffer
 
     def print_setup(self):
         print()
@@ -186,11 +192,37 @@ class GoalWrapper(
         expand_w = 1
         exclude_w = 2
         explain_w = 1
-        explit_w = 1
+        exploit_w = 1
+        exploit_dist = 0.1
+
+        # TODO make version that takes/can produce grid of points in obs space
+        # to visualize (parts of) the value landscape as given by the data at
+        # that time. Might require separate return setup, and thus we should
+        # maybe break up this function into parts
+
+        # TODO maybe see if we can break this out as a separate class/file
+
+        # TODO make all hyperparameters available outside function, maybe using
+        # lambda function to get fixed version for each run?
+
+        # TODO consider and possibly implement way to change component weights
+        # over time with a scheduler. We might want more exploit later, for
+        # instance, but maybe also more experiment/expand early? unclear
 
         # first goal is random
         if len(self.targeted_goals) < 1:
             return self.sample_obs_goal(obs)
+
+        # TODO doesn't handle multiple environments, fix
+        rb = self.replay_buffer
+        upper_bound = rb.buffer_size if rb.full else rb.pos # all before have data
+        obs = self.replay_buffer.observations["observation"][:upper_bound,0]
+        # TODO reward parts being storead in dict is inefficient, can we fix it
+        # without breaking the api?
+        ext_rewards = np.array([l["exreward"] for l in \
+                                self.replay_buffer.infos[:upper_bound,0]])
+        # normalize with symlog like Dreamer v3
+        ext_rewards = utils.symlog(ext_rewards)
 
         # TODO determine if we need to flatten stuff here too for the general case
         # TODO optimize this
@@ -201,16 +233,23 @@ class GoalWrapper(
 
         # normalize so that each dimension matters as much with obs space size
         # TODO or actual values seen in data?
+        # or with symlog, but that would need to be on distances not coordinates
+        # TODO apparently there is a env.normalize_obs
+        # I should check if I can use that instead, it is a running average
         n_candidate_points = self.norm_each_dim(candidate_points)
-        seen_goals = self.norm_each_dim(self.seen_goals)
+        seen_goals = self.norm_each_dim(obs)
         targeted_goals = self.norm_each_dim(self.targeted_goals)
+
+        # get number of elements for seen/targeted for means
+        num_seen = len(seen_goals)
+        num_targeted = len(targeted_goals)
 
         # calc distance between each candidate and each previous goals
         seen_dists = scipy.spatial.distance.cdist(seen_goals,n_candidate_points)
         targeted_dists = scipy.spatial.distance.cdist(targeted_goals,n_candidate_points)
         all_dists = np.concatenate((seen_dists, targeted_dists))
 
-        # select components to care about it not all at all times
+        # select components to care about if not all at all times
 
         # get experiment component
         # select candidate that is most "alone". This could be the one who's
@@ -223,6 +262,9 @@ class GoalWrapper(
 
         # get exclude component
         # TODO discount exclusion over time
+        # for now we make it a mean (by dividing by number of targeted goals)
+        # the size of each exclusion on average shrinks with new data, that
+        # should be enough
         targeted2seen_dists = scipy.spatial.distance.cdist(seen_goals,targeted_goals)
         exclusion_sizes = np.min(targeted2seen_dists, 0)
         exclusion_per_target = - np.maximum(1-targeted_dists/exclusion_sizes[:, None], 0)
@@ -230,17 +272,29 @@ class GoalWrapper(
 
         # TODO get explain component
 
-        # TODO get exploit component
+        # get exploit component
+        # for now a mean over all seen points
+        # TODO this presumes a reward of 0 for unseen states, should the default
+        # be something else, like a mean over rewards instead?
+        exploit_per_seen = np.maximum(1-seen_dists/exploit_dist, 0)*ext_rewards[:, None]
+        exploit_contrib = np.sum(exploit_per_seen, 0)/num_seen
 
         # compine components and select best candidate
         # TODO add new components
         total_goal_val = experiment_w * min_dist_to_any \
                        + expand_w * goldilocks \
-                       + exclude_w * exclusion_contrib
+                       + exclude_w * exclusion_contrib \
+                       + exploit_w * exploit_contrib
 
-        print(experiment_w * min_dist_to_any)
-        print(expand_w * goldilocks)
-        print(exclude_w * exclusion_contrib)
+        components_for_candidates = [experiment_w * min_dist_to_any,
+                                     expand_w * goldilocks,
+                                     exclude_w * exclusion_contrib,
+                                     [0]*num_cand, # explain not implemented yet
+                                     exploit_w * exploit_contrib,]
+        self.components_for_candidates.append(components_for_candidates)
+
+        for part in components_for_candidates:
+            print(np.array2string(np.array(part), sign=' ', precision=3))
         print(total_goal_val)
         print(np.max(total_goal_val))
         print()

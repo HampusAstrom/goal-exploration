@@ -117,6 +117,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # and create one otherwise. We should therefore set goal strategy here after model is setup I guess
     # removes some nice separation, but is maybe ok for now?
     # Also, when we replace the set of all seen states with a downsamples proxy, this might be more clear
+    train_env_goal.link_buffer(model.replay_buffer)
 
     start_time = time.time()
     model.learn(steps, callback=eval_callback, progress_bar=True)
@@ -125,7 +126,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
 
-    # TODO move plots to dedicated file
+    # TODO move plots to dedicated file and make generic with obs dims
     targeted_goals = np.stack(train_env_goal.targeted_goals)
     print(targeted_goals)
     fig = plt.figure()
@@ -190,7 +191,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["test4",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["test7",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
 
