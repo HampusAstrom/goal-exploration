@@ -26,7 +26,7 @@ class GoalWrapper(
     def __init__(
             self,
             env: gym.Env,
-            intrinsic_weight: float=0.5,
+            goal_weight: float=0.5,
             reward_func = None, # TODO make type hint with Callable
             goal_selection_strategies = None, # TODO make type hint with Callable
             goal_sel_strat_weight = None,
@@ -34,12 +34,12 @@ class GoalWrapper(
     ):
         gym.utils.RecordConstructorArgs.__init__(
             self,
-            intrinsic_weight=intrinsic_weight,
+            goal_weight=goal_weight,
         )
         gym.Wrapper.__init__(self, env)
 
-        assert intrinsic_weight >=0 and intrinsic_weight <= 1
-        self.intrinsic_weight = intrinsic_weight
+        assert goal_weight >=0 and goal_weight <= 1
+        self.goal_weight = goal_weight
         # for now this only supports flattenable observation spaces
         assert self.env.observation_space.is_np_flattenable
         # TODO this supports inputing a reward function from the outside, but we should
@@ -83,16 +83,16 @@ class GoalWrapper(
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         # get goal conditioned reward
-        inreward = self.compute_reward(obs, self.goal, info)
-        iw = self.intrinsic_weight
+        goal_reward = self.compute_reward(obs, self.goal, info)
+        gw = self.goal_weight
         # output weighted average of rewards
-        totreward = iw*inreward + (1-iw)*reward
+        totreward = gw*goal_reward + (1-gw)*reward
 
         # save separate rewards in info
-        assert info.get("exreward") == None
-        assert info.get("inreward") == None
-        info["exreward"] = reward
-        info["inreward"] = inreward
+        assert info.get("extrinsic_reward") == None
+        assert info.get("goal_reward") == None
+        info["extrinsic_reward"] = reward
+        info["goal_reward"] = goal_reward
 
         #self.seen_goals.append(obs)
 
@@ -128,7 +128,7 @@ class GoalWrapper(
     def print_setup(self):
         print()
         print("Goal wrapper setup")
-        print("intrinsic_weight: " + str(self.intrinsic_weight))
+        print("goal weight: " + str(self.goal_weight))
         print("goal selection method: " + str(self.select_goal))
         print("goal selection strategies: " + str(self.selection_strategies))
         print("goal selection strategie weights: " + str(self.strat_weights))
@@ -178,6 +178,8 @@ class GoalWrapper(
     def goldilocks(dists):
         # assumes normalized dimensions
         # TODO make a tunable or adapt on their own based on experience
+        # TODO determine if this function is too "flat"? maybe replace with
+        # gaussian
         a = 0.1 # sets distance for maximum, with a max value of 1
         beta = 1/a**2
         alpha = 2/a
@@ -218,7 +220,7 @@ class GoalWrapper(
         obs = self.replay_buffer.observations["observation"][:upper_bound,0]
         # TODO reward parts being storead in dict is inefficient, can we fix it
         # without breaking the api?
-        ext_rewards = np.array([l["exreward"] for l in \
+        ext_rewards = np.array([l["extrinsic_reward"] for l in \
                                 self.replay_buffer.infos[:upper_bound,0]])
         # normalize with symlog like Dreamer v3
         ext_rewards = utils.symlog(ext_rewards)

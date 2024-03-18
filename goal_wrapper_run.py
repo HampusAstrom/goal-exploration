@@ -20,7 +20,7 @@ from goal_wrapper import GoalWrapper
 def train(base_path: str = "./temp/wrapper/pendulum/",
           steps: int = 10000,
           experiment: str = "exp1",
-          intrinsic_weight: float = 0.5,
+          goal_weight: float = 0.5,
           eval_seed: int = None,
           train_seed: int = None,
           policy_seed: int = None,
@@ -35,7 +35,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # Create 4 artificial transitions per real transition
     n_sampled_goal = 4
 
-    options = str(steps) + "steps_" + str(intrinsic_weight) + "inrewardWeight_" + str(fixed_goal_fraction) + "fixedGoalFraction"
+    options = str(steps) + "steps_" + str(goal_weight) + "goalrewardWeight_" + str(fixed_goal_fraction) + "fixedGoalFraction"
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -48,7 +48,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
         train_env.reset(seed=train_seed)
 
     # wrap with goal conditioning and monitor wrappers
-    train_env_goal = GoalWrapper(train_env, intrinsic_weight=intrinsic_weight)
+    train_env_goal = GoalWrapper(train_env, goal_weight=goal_weight)
     train_env = Monitor(train_env_goal, log_dir)
     #train_env = VecMonitor(train_env, log_dir)
 
@@ -74,7 +74,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # for eval we want to always evaluate with the goal at the top
     # if weight should be 0 (using real reward, or 1 using goal reward, or a mixture like
     # in training can be discussed)
-    eval_env = GoalWrapper(eval_env, intrinsic_weight=1, goal_selection_strategies=fixed_goal)
+    eval_env = GoalWrapper(eval_env, goal_weight=1, goal_selection_strategies=fixed_goal)
     eval_env = Monitor(eval_env, eval_log_dir)
 
     # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -191,7 +191,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["test7",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["test10",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
 
@@ -200,6 +200,6 @@ if __name__ == '__main__':
         train(fixed_goal_fraction = conf[0],
               experiment=conf[1],
               steps=20000,
-              intrinsic_weight=1.0,
+              goal_weight=1.0,
               device="cuda"
               )
