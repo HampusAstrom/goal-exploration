@@ -177,12 +177,11 @@ class GoalWrapper(
     @staticmethod
     def goldilocks(dists):
         # assumes normalized dimensions
-        # TODO we should calc what "optimal distance" these parameters imply
-        # and set the parameters so that it is 1 at it's maximum for tuning
-        # and both/either make them tunable or adapt on their own based on experience
-        alpha = 4
-        temp = dists - alpha * dists**2
-        return np.maximum(dists - alpha * dists**2, 0)
+        # TODO make a tunable or adapt on their own based on experience
+        a = 0.1 # sets distance for maximum, with a max value of 1
+        beta = 1/a**2
+        alpha = 2/a
+        return np.maximum(alpha*dists - beta*dists**2, 0)
 
     def select_goal_for_coverage(self, obs):
         # this temporary goal selection stratefy only tries to cover the space with
@@ -190,7 +189,7 @@ class GoalWrapper(
         num_cand = 10
         experiment_w = 1
         expand_w = 1
-        exclude_w = 2
+        exclude_w = 5
         explain_w = 1
         exploit_w = 1
         exploit_dist = 0.1
