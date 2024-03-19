@@ -73,7 +73,6 @@ class GoalWrapper(
         # TODO replace with flexible solution
         #self.seen_goals = []
         self.targeted_goals = []
-        self.components_for_candidates = []
 
     def step(
             self,
@@ -93,6 +92,7 @@ class GoalWrapper(
         assert info.get("goal_reward") == None
         info["extrinsic_reward"] = reward
         info["goal_reward"] = goal_reward
+        # TODO add intrinsic reaward here, unless already added by lower wrapper?
 
         #self.seen_goals.append(obs)
 
@@ -164,13 +164,21 @@ class GoalWrapper(
         # for now returning dense reward, hard to extimate generic cutoff value
         return np.exp(-distance)
 
+class FiveXGoalSelection():
+    def __init__(self, env, replay_buffer, targeted_goals_list) -> None:
+        self.env = env
+        print(self.env)
+        self.replay_buffer = replay_buffer
+        self.targeted_goals = targeted_goals_list
+        self.components_for_candidates = []
+
     def norm_each_dim(self, array):
         # normalizes each sample in array to be on the range of 0-1 in each dimension
         # does not work for inf dims...
         # TODO replace with norm that matches sampling strategy for
         # bounded/unbounded in https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/spaces/box.py
-        low = self.env.observation_space.low
-        high = self.env.observation_space.high
+        low = self.env.unwrapped.observation_space.low
+        high = self.env.unwrapped.observation_space.high
         ret = (array - low)/(high - low)
         return ret
 
@@ -210,9 +218,12 @@ class GoalWrapper(
         # over time with a scheduler. We might want more exploit later, for
         # instance, but maybe also more experiment/expand early? unclear
 
+        # TODO determine if there is a nice way to make all components somewhat
+        # balanced, on average or all the time (before weights)
+
         # first goal is random
         if len(self.targeted_goals) < 1:
-            return self.sample_obs_goal(obs)
+            return self.env.unwrapped.observation_space.sample()
 
         # TODO doesn't handle multiple environments, fix
         rb = self.replay_buffer
@@ -230,7 +241,7 @@ class GoalWrapper(
         # TODO mock data and make testcase to verify each component and result
 
         # make matrix of candidate points
-        candidate_points = np.stack([self.env.observation_space.sample() for i in range(num_cand)])
+        candidate_points = np.stack([self.env.unwrapped.observation_space.sample() for i in range(num_cand)])
 
         # normalize so that each dimension matters as much with obs space size
         # TODO or actual values seen in data?

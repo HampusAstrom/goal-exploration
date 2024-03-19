@@ -15,7 +15,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 
 import time
 
-from goal_wrapper import GoalWrapper
+from goal_wrapper import GoalWrapper, FiveXGoalSelection
 
 def train(base_path: str = "./temp/wrapper/pendulum/",
           steps: int = 10000,
@@ -53,11 +53,6 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     #train_env = VecMonitor(train_env, log_dir)
 
     fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
-    #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
-    goal_selection_strategies = [train_env_goal.select_goal_for_coverage, fixed_goal]
-    goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
-    train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
-    train_env_goal.print_setup()
 
     # Create log dir where evaluation results will be saved
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
@@ -117,7 +112,16 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # and create one otherwise. We should therefore set goal strategy here after model is setup I guess
     # removes some nice separation, but is maybe ok for now?
     # Also, when we replace the set of all seen states with a downsamples proxy, this might be more clear
-    train_env_goal.link_buffer(model.replay_buffer)
+    # train_env_goal.link_buffer(model.replay_buffer)
+    goal_selection = FiveXGoalSelection(train_env_goal,
+                                        model.replay_buffer,
+                                        train_env_goal.targeted_goals)
+
+    #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
+    goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
+    goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
+    train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
+    train_env_goal.print_setup()
 
     start_time = time.time()
     model.learn(steps, callback=eval_callback, progress_bar=True)
@@ -191,7 +195,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["test10",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["test11",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
 
