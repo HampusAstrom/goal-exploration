@@ -202,6 +202,7 @@ class FiveXGoalSelection():
         exclude_w = 5
         explain_w = 1
         exploit_w = 1
+        explain_dist = 0.1
         exploit_dist = 0.1
 
         # TODO make version that takes/can produce grid of points in obs space
@@ -235,6 +236,10 @@ class FiveXGoalSelection():
                                 self.replay_buffer.infos[:upper_bound,0]])
         # normalize with symlog like Dreamer v3
         ext_rewards = utils.symlog(ext_rewards)
+
+        int_rewards = np.array([l.get("inrinsic_reward", 0) for l in \
+                                self.replay_buffer.infos[:upper_bound,0]])
+        int_rewards = utils.symlog(int_rewards)
 
         # TODO determine if we need to flatten stuff here too for the general case
         # TODO optimize this
@@ -283,6 +288,8 @@ class FiveXGoalSelection():
         exclusion_contrib = np.sum(exclusion_per_target, 0)
 
         # TODO get explain component
+        explain_per_seen = np.maximum(1-seen_dists/explain_dist, 0)*int_rewards[:, None]
+        explain_contrib = np.sum(explain_per_seen, 0)/num_seen
 
         # get exploit component
         # for now a mean over all seen points
@@ -296,12 +303,13 @@ class FiveXGoalSelection():
         total_goal_val = experiment_w * min_dist_to_any \
                        + expand_w * goldilocks \
                        + exclude_w * exclusion_contrib \
+                       + explain_w * explain_contrib \
                        + exploit_w * exploit_contrib
 
         components_for_candidates = [experiment_w * min_dist_to_any,
                                      expand_w * goldilocks,
                                      exclude_w * exclusion_contrib,
-                                     [0]*num_cand, # explain not implemented yet
+                                     explain_w * explain_contrib,
                                      exploit_w * exploit_contrib,]
         self.components_for_candidates.append(components_for_candidates)
 
