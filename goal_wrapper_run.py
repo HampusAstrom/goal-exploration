@@ -195,7 +195,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 #     print(np.sort(res))
 
 if __name__ == '__main__':
-    experiments = ["test12",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    experiments = ["test13",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
 

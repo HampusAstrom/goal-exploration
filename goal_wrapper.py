@@ -193,6 +193,30 @@ class FiveXGoalSelection():
         alpha = 2/a
         return np.maximum(alpha*dists - beta*dists**2, 0)
 
+    @staticmethod
+    def inverse_distance_weighting_capped(dists, rewards, range):
+        mean_reward = np.mean(rewards)
+        zones = np.maximum(1-dists/range, 0)
+        zones_sum =  np.sum(zones, 0)
+        contrib_per_seen = zones*rewards[:, None]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            contrib = np.sum(contrib_per_seen, 0)/zones_sum
+        # replace nan:s (from when no point in area) with mean of all points
+        contrib[np.isnan(contrib)] = mean_reward
+        return contrib
+
+    @staticmethod
+    def inverse_distance_weighting(dists, rewards):
+        with np.errstate(divide='ignore'):
+            contrib_per_seen = rewards[:, None]/dists
+            print(contrib_per_seen)
+            contrib = np.sum(contrib_per_seen, 0)/np.sum(dists, 0)
+        # replace nan:s (from when exact point is seen) with that point
+        to_replace = np.logical_or(np.isnan(contrib_per_seen),
+                                   np.isinf(contrib_per_seen))
+        contrib[np.any(to_replace, 0)] = rewards[np.where(np.any(to_replace, axis=0))]
+        return contrib
+
     def select_goal_for_coverage(self, obs):
         # this temporary goal selection stratefy only tries to cover the space with
         # seen and targeted goals, to be improved later
@@ -209,8 +233,6 @@ class FiveXGoalSelection():
         # to visualize (parts of) the value landscape as given by the data at
         # that time. Might require separate return setup, and thus we should
         # maybe break up this function into parts
-
-        # TODO maybe see if we can break this out as a separate class/file
 
         # TODO make all hyperparameters available outside function, maybe using
         # lambda function to get fixed version for each run?
@@ -237,7 +259,8 @@ class FiveXGoalSelection():
         # normalize with symlog like Dreamer v3
         ext_rewards = utils.symlog(ext_rewards)
 
-        int_rewards = np.array([l.get("inrinsic_reward", 0) for l in \
+        # TODO make sure that we have policy that saves intrinsic rewards here
+        int_rewards = np.array([l.get("intrinsic_reward", 0) for l in \
                                 self.replay_buffer.infos[:upper_bound,0]])
         int_rewards = utils.symlog(int_rewards)
 
@@ -256,10 +279,6 @@ class FiveXGoalSelection():
         n_candidate_points = self.norm_each_dim(candidate_points)
         seen_goals = self.norm_each_dim(obs)
         targeted_goals = self.norm_each_dim(self.targeted_goals)
-
-        # get number of elements for seen/targeted for means
-        num_seen = len(seen_goals)
-        num_targeted = len(targeted_goals)
 
         # calc distance between each candidate and each previous goals
         seen_dists = scipy.spatial.distance.cdist(seen_goals,n_candidate_points)
@@ -287,19 +306,19 @@ class FiveXGoalSelection():
         exclusion_per_target = - np.maximum(1-targeted_dists/exclusion_sizes[:, None], 0)
         exclusion_contrib = np.sum(exclusion_per_target, 0)
 
-        # TODO get explain component
-        explain_per_seen = np.maximum(1-seen_dists/explain_dist, 0)*int_rewards[:, None]
-        explain_contrib = np.sum(explain_per_seen, 0)/num_seen
+        # get explain component
+        explain_contrib = self.inverse_distance_weighting_capped(seen_dists,
+                                                                 int_rewards,
+                                                                 explain_dist)
 
         # get exploit component
-        # for now a mean over all seen points
-        # TODO this presumes a reward of 0 for unseen states, should the default
-        # be something else, like a mean over rewards instead?
-        exploit_per_seen = np.maximum(1-seen_dists/exploit_dist, 0)*ext_rewards[:, None]
-        exploit_contrib = np.sum(exploit_per_seen, 0)/num_seen
+        exploit_contrib = self.inverse_distance_weighting_capped(seen_dists,
+                                                                 ext_rewards,
+                                                                 exploit_dist)
+
+        # TODO make it easy to choose capped and non-capped exploit/explain
 
         # compine components and select best candidate
-        # TODO add new components
         total_goal_val = experiment_w * min_dist_to_any \
                        + expand_w * goldilocks \
                        + exclude_w * exclusion_contrib \
