@@ -1,0 +1,114 @@
+import numpy as np
+import utils
+import matplotlib.pyplot as plt
+
+from goal_wrapper import FiveXGoalSelection
+
+a = [[1, 0],
+     [0, 1],
+     [-1, 0],
+     [0, -1],
+     ]
+b = [0,
+     np.pi/2,
+     np.pi,
+     np.pi*3/2,
+     ]
+
+for i in range(len(a)):
+    c = np.arctan2(a[i][1], a[i][0])
+    c = ((c + np.pi) % (2 * np.pi)) - np.pi
+    b2 = ((b[i] + np.pi) % (2 * np.pi)) - np.pi
+    d = b2-c
+    print(f"(x, y) = {a[i]}, expect {b2}, got {c}. diff = {d}")
+
+
+print()
+
+theta = [np.pi/4, 0.3, 0.1, np.pi/20, np.pi/4, 0.3, 0.1, np.pi/20, np.pi/4, 0.3, 0.1, np.pi/20]
+thdot = [0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8]
+u = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+
+for i in range(len(theta)):
+    cost = theta[i] ** 2 + 0.1 * thdot[i]**2 + 0.001 * (u[i]**2)
+    print(cost)
+
+print()
+
+x4 = np.cos(np.pi/4)
+y4 = np.sin(np.pi/4)
+x16 = np.cos(np.pi/16)
+y16 = np.sin(np.pi/16)
+
+a = np.asarray([[0, 1, 8],
+                [1, 0, 8],
+                [x4, y4, 8],
+                [0, 1, 2],
+                [1, 0, 2],
+                [x4, y4, 2],
+                [0, 1, 0],
+                [1, 0, 0],
+                [x4, y4, 0],
+                [0, 1, -8],
+                [1, 0, -8],
+                [x4, y4, -8],
+                [0, 1, -2],
+                [1, 0, -2],
+                [x4, y4, -2],
+                [0, 1, -1],
+                [1, 0, -1],
+                [x4, y4, -1],
+                [x16, y16, 8],
+                [-x16, -y16, 8],
+                [x16, y16, -8],
+                [-x16, -y16, -8],
+                [x16, y16, 4],
+                [-x16, -y16, 2],
+                [x16, y16, -4],
+                [-x16, -y16, -2],
+                ])
+
+b = a
+
+res = []
+for i in range(len(a)):
+    for j in range(len(b)):
+        distance = np.linalg.norm(a[i] - b[j], axis=-1)
+        #r = np.exp(-distance)
+        r = distance
+        res.append(r)
+        print(r)
+
+print(f"Mean: {np.mean(res)}")
+print(f"Std: {np.std(res)}")
+print(f"Min: {np.min(res)}")
+print(f"Max: {np.max(res)}")
+
+print(np.sort(res))
+
+a = np.linspace(-10, 10)
+b = utils.symlog(a)
+a2 = utils.symexp(b)
+c = utils.symexp(a)
+a3 = utils.symlog(c)
+fig = plt.figure()
+ax = fig.add_subplot(221)
+plt.plot(a, b)
+ax = fig.add_subplot(222)
+plt.plot(a, a2)
+ax = fig.add_subplot(223)
+plt.plot(a, c)
+ax = fig.add_subplot(224)
+plt.plot(a, a3)
+plt.savefig("test_symlog")
+
+
+dists = np.asarray([[0, 1, 3.5], [1, 0, 0], [1, 4, 2], [4, 4, 5]]).transpose()
+rewards = np.asarray([1, 14, 3])
+
+idw = FiveXGoalSelection.inverse_distance_weighting(dists, rewards)
+print(idw)
+
+idw = FiveXGoalSelection.inverse_distance_weighting_capped(dists, rewards, 4)
+print(idw)
