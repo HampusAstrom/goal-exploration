@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from itertools import product
 
 from stable_baselines3 import SAC, HerReplayBuffer
-from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_checker import check_env
@@ -16,6 +16,40 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 import time
 
 from goal_wrapper import GoalWrapper, FiveXGoalSelection
+
+class MapGoalComponentsCallback(BaseCallback):
+    def __init__(self, log_path, eval_points, dimension_names, eval_freq, goal_selector, verbose=0):
+        super(MapGoalComponentsCallback, self).__init__(verbose)
+        self.log_path = log_path
+        self.eval_freq = eval_freq
+        self.eval_points = eval_points
+        self.goal_selector = goal_selector
+        self.dimension_names = dimension_names
+
+    def _init_callback(self) -> None:
+        if self.log_path is not None:
+            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+            with open(os.path.join(self.log_path,"goal_component_map.txt"), "ab") as f:
+                np.savetxt(f,
+                        [],
+                        header="step, " + str(self.dimension_names) \
+                            + " experiment, expand, exclude, explain, exploit",
+                        )
+
+
+
+    def _on_step(self) -> bool:
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            components = self.goal_selector.select_goal_for_coverage(0,
+                                                fixed_candidates=self.eval_points,
+                                                map_not_choose=True,).T
+            step = np.full((len(components), 1), self.n_calls)
+            ret = np.concatenate((step, self.eval_points, components), 1)
+            with open(os.path.join(self.log_path,"goal_component_map.txt"), "ab") as f:
+                np.savetxt(f,ret)
+
+        return True # never stop training
+
 
 def train(base_path: str = "./temp/wrapper/pendulum/",
           steps: int = 10000,
@@ -134,6 +168,16 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
                                             model.replay_buffer,
                                             train_env_goal.targeted_goals)
 
+    value_map_grid = goal_selection.grid_of_points(10)
+    mapping_callback = MapGoalComponentsCallback(log_path=eval_log_dir,
+                                                 eval_points=value_map_grid,
+                                                 eval_freq=max(500 // n_training_envs, 1),
+                                                 goal_selector=goal_selection,
+                                                 dimension_names="x, y, theta,"
+                                                 )
+
+    callback = CallbackList([mapping_callback, eval_callback])
+
     #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
     goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
     goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
@@ -141,7 +185,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     train_env_goal.print_setup()
 
     start_time = time.time()
-    model.learn(steps, callback=eval_callback, progress_bar=True)
+    model.learn(steps, callback=callback, progress_bar=True)
     print("--- %s seconds ---" % (time.time() - start_time))
     #model.learn(steps, progress_bar=True)
     model_path = os.path.join(base_path, options, experiment, 'model')

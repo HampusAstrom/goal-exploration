@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import scipy
+from itertools import product
 
 from gymnasium import error, logger
 from gymnasium.core import ActType, ObsType
@@ -131,7 +132,7 @@ class GoalWrapper(
         print("goal weight: " + str(self.goal_weight))
         print("goal selection method: " + str(self.select_goal))
         print("goal selection strategies: " + str(self.selection_strategies))
-        print("goal selection strategie weights: " + str(self.strat_weights))
+        print("goal selection strategy weights: " + str(self.strat_weights))
         print("goal reward function: " + str(self.compute_reward))
         print()
 
@@ -172,17 +173,12 @@ class FiveXGoalSelection():
                  num_candidates = 10,
                  component_weights = [1, 1, 5, 1, 1],
                  explain_dist = 0.1,
-                 exploit_dist = 0.1,
-                 fixed_candidates: np.ndarray = None) -> None:
+                 exploit_dist = 0.1,) -> None:
         self.env = env
         self.replay_buffer = replay_buffer
         self.targeted_goals = targeted_goals_list
         self.components_for_candidates = []
-        if fixed_candidates:
-            self.num_candidates = len(fixed_candidates)
-        else:
-            self.num_candidates = num_candidates
-        self.fixed_candidates = fixed_candidates
+        self.num_candidates = num_candidates
         self.component_weights = component_weights
         self.explain_dist = explain_dist
         self.exploit_dist = exploit_dist
@@ -196,6 +192,16 @@ class FiveXGoalSelection():
         high = self.env.unwrapped.observation_space.high
         ret = (array - low)/(high - low)
         return ret
+
+    def grid_of_points(self, points_per_dim):
+        # TODO this method should probably be in utils and take an env instead
+        o_space = self.env.unwrapped.observation_space
+        grid_per_dim = np.linspace(o_space.low,
+                                 o_space.high,
+                                 points_per_dim,
+                                 )
+        ret = list(product(*grid_per_dim.T))
+        return np.array(ret)
 
     @staticmethod
     def goldilocks(dists):
@@ -232,14 +238,14 @@ class FiveXGoalSelection():
         contrib[np.any(to_replace, 0)] = rewards[np.where(np.any(to_replace, axis=0))]
         return contrib
 
-    def select_goal_for_coverage(self, obs):
+    def select_goal_for_coverage(self,
+                                 obs,
+                                 fixed_candidates = None,
+                                 map_not_choose = False):
         # TODO make version that takes/can produce grid of points in obs space
         # to visualize (parts of) the value landscape as given by the data at
         # that time. Might require separate return setup, and thus we should
         # maybe break up this function into parts
-
-        # TODO make all hyperparameters available outside function, maybe using
-        # lambda function to get fixed version for each run?
 
         # TODO consider and possibly implement way to change component weights
         # over time with a scheduler. We might want more exploit later, for
@@ -255,7 +261,7 @@ class FiveXGoalSelection():
         # TODO doesn't handle multiple environments, fix
         rb = self.replay_buffer
         upper_bound = rb.buffer_size if rb.full else rb.pos # all before have data
-        obs = self.replay_buffer.observations["observation"][:upper_bound,0]
+        observations = self.replay_buffer.observations["observation"][:upper_bound,0]
         # TODO reward parts being storead in dict is inefficient, can we fix it
         # without breaking the api?
         ext_rewards = np.array([l["extrinsic_reward"] for l in \
@@ -273,8 +279,8 @@ class FiveXGoalSelection():
         # TODO mock data and make testcase to verify each component and result
 
         # make matrix of candidate points
-        if self.fixed_candidates:
-            candidate_points = self.fixed_candidates
+        if fixed_candidates is not None:
+            candidate_points = fixed_candidates
         else:
             candidate_points = np.stack([self.env.unwrapped.observation_space.sample() \
                                 for i in range(self.num_candidates)])
@@ -285,7 +291,7 @@ class FiveXGoalSelection():
         # TODO apparently there is a env.normalize_obs
         # I should check if I can use that instead, it is a running average
         n_candidate_points = self.norm_each_dim(candidate_points)
-        seen_goals = self.norm_each_dim(obs)
+        seen_goals = self.norm_each_dim(observations)
         targeted_goals = self.norm_each_dim(self.targeted_goals)
 
         # calc distance between each candidate and each previous goals
@@ -326,16 +332,19 @@ class FiveXGoalSelection():
 
         # TODO make it easy to choose capped and non-capped exploit/explain
 
-        components_for_candidates = [self.component_weights[0] * min_dist_to_any,
+        components_for_candidates = np.array([self.component_weights[0] * min_dist_to_any,
                                      self.component_weights[1] * goldilocks,
                                      self.component_weights[2] * exclusion_contrib,
                                      self.component_weights[3] * explain_contrib,
-                                     self.component_weights[4] * exploit_contrib,]
+                                     self.component_weights[4] * exploit_contrib,])
 
         # compine components and select best candidate
         total_goal_val = np.sum(components_for_candidates, 0)
 
-        self.components_for_candidates.append(components_for_candidates)
+        if not map_not_choose:
+            self.components_for_candidates.append(components_for_candidates)
+        else:
+            return components_for_candidates
 
         for part in components_for_candidates:
             print(np.array2string(np.array(part), sign=' ', precision=3))
