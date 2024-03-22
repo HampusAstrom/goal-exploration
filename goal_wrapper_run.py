@@ -26,6 +26,7 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
           policy_seed: int = None,
           fixed_goal_fraction = 0.0,
           device = None,
+          goal_selection_params: dict = None,
          ):
 
     env_id = "Pendulum-v1" # "MountainCarContinuous-v0"
@@ -35,11 +36,21 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # Create 4 artificial transitions per real transition
     n_sampled_goal = 4
 
-    options = str(steps) + "steps_" + str(goal_weight) + "goalrewardWeight_" + str(fixed_goal_fraction) + "fixedGoalFraction"
+    options = str(steps) + "steps_" \
+            + str(goal_weight) + "goalrewardWeight_" \
+            + str(fixed_goal_fraction) + "fixedGoalFraction"
+
+    for key, val in goal_selection_params.items():
+        if type(val) is list:
+            options += "_[" + ",".join(str(v) for v in val) + "]" + key
+        else:
+            options += "_" + str(val) + key
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
     os.makedirs(log_dir, exist_ok=True)
+
+    # TODO save some config file in folder to keep track of parameters used
 
     # Initialize a training environment with default parameters
     #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0, vec_env_cls=SubprocVecEnv)
@@ -113,9 +124,15 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     # removes some nice separation, but is maybe ok for now?
     # Also, when we replace the set of all seen states with a downsamples proxy, this might be more clear
     # train_env_goal.link_buffer(model.replay_buffer)
-    goal_selection = FiveXGoalSelection(train_env_goal,
-                                        model.replay_buffer,
-                                        train_env_goal.targeted_goals)
+    if goal_selection_params is not None: # assumes that all keys are params to func
+        goal_selection = FiveXGoalSelection(train_env_goal,
+                                            model.replay_buffer,
+                                            train_env_goal.targeted_goals,
+                                            **goal_selection_params)
+    else:
+        goal_selection = FiveXGoalSelection(train_env_goal,
+                                            model.replay_buffer,
+                                            train_env_goal.targeted_goals)
 
     #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
     goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
@@ -194,16 +211,40 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
 
 #     print(np.sort(res))
 
-if __name__ == '__main__':
-    experiments = ["test13",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
-    fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
-    #device = ["cpu", "cuda"]
+def named_permutations(params_to_permute: dict):
+    list = []
+    for combs in product (*params_to_permute.values()):
+        conf = {ele: cnt for ele, cnt in zip(params_to_permute, combs)}
+        list.append(conf)
+    return list
 
-    for conf in product(fixed_goal_fractions, experiments):
+
+if __name__ == '__main__':
+    #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
+    #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
+    #device = ["cpu", "cuda"]
+    goal_conf_to_permute = {#"exploit_dist": [0.1, 0.2],
+                            #"component_weights": [[1, 1, 5, 1, 1]],
+                            }
+
+    params_to_permute = {"experiment": ["test1"],
+                         "fixed_goal_fraction": [0.0],
+                         "device": ["cuda"],
+                         "steps": [20000],
+                         "goal_weight": [1.0],
+                         "goal_selection_params": named_permutations(goal_conf_to_permute)}
+
+    for combs in product (*params_to_permute.values()):
+        conf = {ele: cnt for ele, cnt in zip(params_to_permute, combs)}
         print("Training with configuration: " + str(conf))
-        train(fixed_goal_fraction = conf[0],
-              experiment=conf[1],
-              steps=20000,
-              goal_weight=1.0,
-              device="cuda"
-              )
+        train(**conf)
+
+
+    # for conf in product(fixed_goal_fractions, experiments):
+    #     print("Training with configuration: " + str(conf))
+    #     train(fixed_goal_fraction = conf[0],
+    #             experiment=conf[1],
+    #             steps=20000,
+    #             goal_weight=1.0,
+    #             device="cuda"
+    #             )

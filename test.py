@@ -112,3 +112,14 @@ print(idw)
 
 idw = FiveXGoalSelection.inverse_distance_weighting_capped(dists, rewards, 4)
 print(idw)
+
+def test_func(a = 0, b = 0, c = 0):
+    print(f"a = {a}, b = {b}, c = {c}")
+
+params_to_permute = {"a": [0, 1, 2], "b": [3, 4, 5]}
+
+from itertools import product
+for combs in product (*params_to_permute.values()):
+    dct = {ele: cnt for ele, cnt in zip(params_to_permute, combs)}
+    print(dct)
+    test_func(**dct)
