@@ -165,12 +165,27 @@ class GoalWrapper(
         return np.exp(-distance)
 
 class FiveXGoalSelection():
-    def __init__(self, env, replay_buffer, targeted_goals_list) -> None:
+    def __init__(self,
+                 env,
+                 replay_buffer,
+                 targeted_goals_list,
+                 num_candidates = 10,
+                 component_weights = [1, 1, 5, 1, 1],
+                 explain_dist = 0.1,
+                 exploit_dist = 0.1,
+                 fixed_candidates: np.ndarray = None) -> None:
         self.env = env
-        print(self.env)
         self.replay_buffer = replay_buffer
         self.targeted_goals = targeted_goals_list
         self.components_for_candidates = []
+        if fixed_candidates:
+            self.num_candidates = len(fixed_candidates)
+        else:
+            self.num_candidates = num_candidates
+        self.fixed_candidates = fixed_candidates
+        self.component_weights = component_weights
+        self.explain_dist = explain_dist
+        self.exploit_dist = exploit_dist
 
     def norm_each_dim(self, array):
         # normalizes each sample in array to be on the range of 0-1 in each dimension
@@ -218,17 +233,6 @@ class FiveXGoalSelection():
         return contrib
 
     def select_goal_for_coverage(self, obs):
-        # this temporary goal selection stratefy only tries to cover the space with
-        # seen and targeted goals, to be improved later
-        num_cand = 10
-        experiment_w = 1
-        expand_w = 1
-        exclude_w = 5
-        explain_w = 1
-        exploit_w = 1
-        explain_dist = 0.1
-        exploit_dist = 0.1
-
         # TODO make version that takes/can produce grid of points in obs space
         # to visualize (parts of) the value landscape as given by the data at
         # that time. Might require separate return setup, and thus we should
@@ -269,7 +273,11 @@ class FiveXGoalSelection():
         # TODO mock data and make testcase to verify each component and result
 
         # make matrix of candidate points
-        candidate_points = np.stack([self.env.unwrapped.observation_space.sample() for i in range(num_cand)])
+        if self.fixed_candidates:
+            candidate_points = self.fixed_candidates
+        else:
+            candidate_points = np.stack([self.env.unwrapped.observation_space.sample() \
+                                for i in range(self.num_candidates)])
 
         # normalize so that each dimension matters as much with obs space size
         # TODO or actual values seen in data?
@@ -309,27 +317,24 @@ class FiveXGoalSelection():
         # get explain component
         explain_contrib = self.inverse_distance_weighting_capped(seen_dists,
                                                                  int_rewards,
-                                                                 explain_dist)
+                                                                 self.explain_dist)
 
         # get exploit component
         exploit_contrib = self.inverse_distance_weighting_capped(seen_dists,
                                                                  ext_rewards,
-                                                                 exploit_dist)
+                                                                 self.exploit_dist)
 
         # TODO make it easy to choose capped and non-capped exploit/explain
 
-        # compine components and select best candidate
-        total_goal_val = experiment_w * min_dist_to_any \
-                       + expand_w * goldilocks \
-                       + exclude_w * exclusion_contrib \
-                       + explain_w * explain_contrib \
-                       + exploit_w * exploit_contrib
+        components_for_candidates = [self.component_weights[0] * min_dist_to_any,
+                                     self.component_weights[1] * goldilocks,
+                                     self.component_weights[2] * exclusion_contrib,
+                                     self.component_weights[3] * explain_contrib,
+                                     self.component_weights[4] * exploit_contrib,]
 
-        components_for_candidates = [experiment_w * min_dist_to_any,
-                                     expand_w * goldilocks,
-                                     exclude_w * exclusion_contrib,
-                                     explain_w * explain_contrib,
-                                     exploit_w * exploit_contrib,]
+        # compine components and select best candidate
+        total_goal_val = np.sum(components_for_candidates, 0)
+
         self.components_for_candidates.append(components_for_candidates)
 
         for part in components_for_candidates:
