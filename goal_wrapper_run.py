@@ -268,7 +268,8 @@ if __name__ == '__main__':
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
     goal_conf_to_permute = {#"exploit_dist": [0.1, 0.2],
-                            #"component_weights": [[1, 1, 5, 1, 1]],
+                            #"component_weights": [[1, 1, 5, 1, 1],
+                            #                      [1, 1, 5, 1, 2]],
                             }
 
     params_to_permute = {"experiment": ["test1"],
@@ -278,11 +279,10 @@ if __name__ == '__main__':
                          "goal_weight": [1.0],
                          "goal_selection_params": named_permutations(goal_conf_to_permute)}
 
-    for combs in product (*params_to_permute.values()):
-        conf = {ele: cnt for ele, cnt in zip(params_to_permute, combs)}
+    experiment_list = named_permutations(params_to_permute)
+    for conf in experiment_list:
         print("Training with configuration: " + str(conf))
         train(**conf)
-
 
     # for conf in product(fixed_goal_fractions, experiments):
     #     print("Training with configuration: " + str(conf))
