@@ -72,7 +72,6 @@ class GoalWrapper(
         # create variables that track seen and targeted goals
         # seen goals can maybe just we replay buffer from policy algorithm
         # TODO replace with flexible solution
-        #self.seen_goals = []
         self.targeted_goals = []
 
     def step(
@@ -161,7 +160,7 @@ class GoalWrapper(
         if achieved_goal.ndim == 2: # handle batch
             flat_achi = flat_achi.reshape(-1, self.goal_dim)
             flat_goal = flat_goal.reshape(-1, self.goal_dim)
-        distance = np.linalg.norm(flat_achi - flat_goal, axis=-1) # TODO not sure about axis here
+        distance = np.linalg.norm(flat_achi - flat_goal, axis=-1)
         # for now returning dense reward, hard to extimate generic cutoff value
         return np.exp(-distance)
 
@@ -242,11 +241,6 @@ class FiveXGoalSelection():
                                  obs,
                                  fixed_candidates = None,
                                  map_not_choose = False):
-        # TODO make version that takes/can produce grid of points in obs space
-        # to visualize (parts of) the value landscape as given by the data at
-        # that time. Might require separate return setup, and thus we should
-        # maybe break up this function into parts
-
         # TODO consider and possibly implement way to change component weights
         # over time with a scheduler. We might want more exploit later, for
         # instance, but maybe also more experiment/expand early? unclear
@@ -339,6 +333,10 @@ class FiveXGoalSelection():
                                      self.component_weights[4] * exploit_contrib,])
 
         # compine components and select best candidate
+        # TODO make an option to only select some components sometimes, possibly
+        # by selecting each goal with some relative weight based on component
+        # weight in a way where many are selected, not just one?
+        # also maybe always exclude?
         total_goal_val = np.sum(components_for_candidates, 0)
 
         if not map_not_choose:
