@@ -1,20 +1,34 @@
-from gym.envs.classic_control.pendulum import PendulumEnv, angle_normalize
+from gymnasium.envs.classic_control.pendulum import PendulumEnv, angle_normalize
 import numpy as np
 
 REWARD_MODE_BINARY = 'binary' # return 1 when pendulum within allowed speed and angle limit over balance_counter time steps
 REWARD_MODE_SPARSE = 'sparse' # return continuous speed reward only within speed and range limit
 
-class SparsePendulumEnv(PendulumEnv):
-    balance_counter = 0
+from gymnasium.envs.registration import register
+# Example for the CartPole environment
+register(
+    # unique identifier for the env `name-version`
+    id="SparsePendulumEnv-v1",
+    # path to the class for creating the env
+    # Note: entry_point also accept a class as input (and not only a string)
+    entry_point="sparse_pendulum:SparsePendulumEnv",
+    # Max number of steps per episode, using a `TimeLimitWrapper`
+    max_episode_steps=200,
+)
 
-    def __init__(self, max_speed, max_torque, reward_angle_limit, reward_speed_limit, balance_counter, reward_mode):
+class SparsePendulumEnv(PendulumEnv):
+
+    def __init__(self,
+                 reward_angle_limit = np.deg2rad(2),
+                 reward_speed_limit = 8, # 8 is max, so no limit
+                 balance_counter = 5,
+                 reward_mode = REWARD_MODE_SPARSE):
         super().__init__()
-        self.max_speed= max_speed
-        self.max_torque= max_torque
         self.reward_speed_limit = reward_speed_limit
         self.reward_angle_limit = reward_angle_limit
         self.balance_counter = balance_counter
         self.reward_mode = reward_mode
+        self.current_balance_counter = 0
 
     def reward_binary(self, th, thdot, u):
         angle = np.degrees(angle_normalize(th))
@@ -22,9 +36,9 @@ class SparsePendulumEnv(PendulumEnv):
         reward = 0
 
         if self.check_angle_speed_limit(angle, thdot):
-            SparsePendulumEnv.balance_counter += 1
-            if SparsePendulumEnv.balance_counter >= self.balance_counter:
-                SparsePendulumEnv.balance_counter = 0
+            self.current_balance_counter += 1
+            if self.current_balance_counter >= self.balance_counter:
+                self.current_balance_counter = 0
                 reward = 1
                 done = True
 
@@ -74,4 +88,4 @@ class SparsePendulumEnv(PendulumEnv):
         self.state = np.array([newth, newthdot])
         obs = self._get_obs()
 
-        return obs, reward, done, {}
+        return obs, reward, done, False, {}
