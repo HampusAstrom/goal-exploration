@@ -3,6 +3,8 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
+import inspect
+import json
 
 from stable_baselines3 import SAC, HerReplayBuffer
 from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
@@ -16,6 +18,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 import time
 
 from goal_wrapper import GoalWrapper, FiveXGoalSelection
+
+from sparse_pendulum import SparsePendulumEnv
 
 class MapGoalComponentsCallback(BaseCallback):
     def __init__(self, log_path, eval_points, dimension_names, eval_freq, goal_selector, verbose=0):
@@ -51,7 +55,7 @@ class MapGoalComponentsCallback(BaseCallback):
         return True # never stop training
 
 
-def train(base_path: str = "./temp/wrapper/pendulum/",
+def train(base_path: str = "./output/wrapper/",
           steps: int = 10000,
           experiment: str = "exp1",
           goal_weight: float = 0.5,
@@ -63,12 +67,16 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
           goal_selection_params: dict = None,
          ):
 
-    env_id = "Pendulum-v1" # "MountainCarContinuous-v0"
+    env_id = "Pendulum-v1" #"SparsePendulumEnv-v1" # "MountainCarContinuous-v0"
+    base_path = os.path.join(base_path,env_id)
     n_training_envs = 1
     n_eval_envs = 5
 
     # Create 4 artificial transitions per real transition
     n_sampled_goal = 4
+
+    # Collect variables to store in json before cluttered
+    conf_params = locals()
 
     options = str(steps) + "steps_" \
             + str(goal_weight) + "goalrewardWeight_" \
@@ -84,7 +92,15 @@ def train(base_path: str = "./temp/wrapper/pendulum/",
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
     os.makedirs(log_dir, exist_ok=True)
 
-    # TODO save some config file in folder to keep track of parameters used
+    # save config file in folder to keep track of parameters used
+    signature = inspect.signature(FiveXGoalSelection)
+    default_goal_selection_params = {k: v.default
+                                     for k, v in signature.parameters.items()
+                                     if v.default is not inspect.Parameter.empty}
+    merged = default_goal_selection_params | goal_selection_params
+    conf_params["goal_selection_params"] = merged
+    with open(os.path.join(base_path, options, experiment, 'config.json'), 'w') as fp:
+        json.dump(conf_params, fp, indent=4)
 
     # Initialize a training environment with default parameters
     #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0, vec_env_cls=SubprocVecEnv)
@@ -268,11 +284,16 @@ if __name__ == '__main__':
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
     goal_conf_to_permute = {#"exploit_dist": [0.1, 0.2],
-                            #"component_weights": [[1, 1, 5, 1, 1],
-                            #                      [1, 1, 5, 1, 2]],
+                            "component_weights": [[1, 1, 5, 1, 1],
+                                                  [1, 1, 5, 1, 2],
+                                                  [1, 1, 5, 1, 5],
+                                                  [1, 0.2, 5, 1, 1],
+                                                  [1, 0.2, 5, 1, 2],
+                                                  [1, 0.2, 5, 1, 5],
+                                                  ],
                             }
 
-    params_to_permute = {"experiment": ["test1"],
+    params_to_permute = {"experiment": ["exp1", "exp2", "exp3", "exp4", "exp5",],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
                          "steps": [20000],
