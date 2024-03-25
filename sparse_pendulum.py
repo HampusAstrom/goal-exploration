@@ -1,5 +1,6 @@
 from gymnasium.envs.classic_control.pendulum import PendulumEnv, angle_normalize
 import numpy as np
+from typing import Optional
 
 REWARD_MODE_BINARY = 'binary' # return 1 when pendulum within allowed speed and angle limit over balance_counter time steps
 REWARD_MODE_SPARSE = 'sparse' # return continuous speed reward only within speed and range limit
@@ -16,22 +17,28 @@ register(
     max_episode_steps=200,
 )
 
+DEFAULT_THETA = np.pi
+DEFAULT_THETADOT = 1.0
+
 class SparsePendulumEnv(PendulumEnv):
 
     def __init__(self,
-                 reward_angle_limit = np.deg2rad(2),
-                 reward_speed_limit = 8, # 8 is max, so no limit
+                 reward_angle_limit = np.pi * 0.05, # currently ignored if sparse
+                 reward_speed_limit = 8, # currently ignored if sparse
                  balance_counter = 5,
-                 reward_mode = REWARD_MODE_SPARSE):
+                 reward_mode = REWARD_MODE_SPARSE,
+                 harder_start: float = None):
         super().__init__()
         self.reward_speed_limit = reward_speed_limit
         self.reward_angle_limit = reward_angle_limit
         self.balance_counter = balance_counter
         self.reward_mode = reward_mode
+        self.harder_start = harder_start
+
         self.current_balance_counter = 0
 
     def reward_binary(self, th, thdot, u):
-        angle = np.degrees(angle_normalize(th))
+        angle = angle_normalize(th)
         done = False
         reward = 0
 
@@ -45,14 +52,24 @@ class SparsePendulumEnv(PendulumEnv):
         return reward, done
 
     def reward_sparse(self, th, thdot, u):
-        angle = np.degrees(angle_normalize(th))
-        done = False
-        reward = 0
+        angle = angle_normalize(th)
+        #done = False
+        #reward = 0
 
-        if self.check_angle_speed_limit(angle, thdot):
-            reward = self.max_speed - (np.absolute(thdot) / 6.0)
+        #if self.check_angle_speed_limit(angle, thdot):
+            #reward = self.max_speed - (np.absolute(thdot) / 6.0)
 
-        return reward, done
+        #return reward, done
+        cost = angle ** 2 + 0.1 * thdot**2 + 0.001 * (u**2)
+        if cost.shape != ():
+            trunc = cost >= 1
+            cost[trunc] = 2
+            return -cost, False
+        else:
+            if cost < 1:
+                return -cost, False
+            else:
+                return -2, False
 
     def check_angle(self, angle):
         return (angle >= -self.reward_angle_limit) and (angle <= self.reward_angle_limit)
@@ -63,29 +80,30 @@ class SparsePendulumEnv(PendulumEnv):
     def check_angle_speed_limit(self, angle, thdot):
         return self.check_angle(angle) and self.check_speed(thdot)
 
+    def reset(self, *,
+              seed: Optional[int] = None,
+              options: Optional[dict] = None):
+        super().reset(seed=seed, options=options)
+        if self.harder_start:
+            range = min(self.harder_start, 1)
+            high = range*DEFAULT_THETA
+            theta = np.random.uniform(low=0, high=high)
+            theta += DEFAULT_THETA-range
+            theta *= 1 if np.random.random() < 0.5 else -1
+            self.state[0] = theta
+
+        return self._get_obs(), {}
+
     def step(self, u):
-        th, thdot = self.state # th := theta
+        obs, _, term, trunk, info = super().step(u)
 
-        g = self.g
-        m = self.m
-        l = self.l
-        dt = self.dt
-        done = False
-        reward = 0
-
-        u = np.clip(u, -self.max_torque, self.max_torque)[0]
-        self.last_u = u # for rendering
+        u = self.last_u
+        info["u"] = u
+        th, thdot = self.state
 
         if self.reward_mode == REWARD_MODE_BINARY:
             reward, done = self.reward_binary(th, thdot, u)
         elif self.reward_mode == REWARD_MODE_SPARSE:
             reward, done = self.reward_sparse(th, thdot, u)
 
-        newthdot = thdot + (-3*g/(2*l) * np.sin(th + np.pi) + 3./(m*l**2)*u) * dt
-        newth = th + newthdot*dt
-        newthdot = np.clip(newthdot, -self.max_speed, self.max_speed) #pylint: disable=E1111
-
-        self.state = np.array([newth, newthdot])
-        obs = self._get_obs()
-
-        return obs, reward, done, False, {}
+        return obs, reward, done, trunk, info
