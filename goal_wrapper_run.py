@@ -65,9 +65,10 @@ def train(base_path: str = "./output/wrapper/",
           fixed_goal_fraction = 0.0,
           device = None,
           goal_selection_params: dict = None,
+          env_params: dict = None,
          ):
 
-    env_id = "Pendulum-v1" #"SparsePendulumEnv-v1" # "MountainCarContinuous-v0"
+    env_id = "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
     base_path = os.path.join(base_path,env_id)
     n_training_envs = 1
     n_eval_envs = 5
@@ -104,7 +105,7 @@ def train(base_path: str = "./output/wrapper/",
 
     # Initialize a training environment with default parameters
     #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0, vec_env_cls=SubprocVecEnv)
-    train_env = gym.make(env_id)
+    train_env = gym.make(env_id, **env_params)
     if train_seed is not None:
         train_env.reset(seed=train_seed)
 
@@ -202,7 +203,8 @@ def train(base_path: str = "./output/wrapper/",
 
     start_time = time.time()
     model.learn(steps, callback=callback, progress_bar=True)
-    print("--- %s seconds ---" % (time.time() - start_time))
+    time_used = time.time() - start_time
+    print("--- %s seconds ---" % (time_used))
     #model.learn(steps, progress_bar=True)
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
@@ -283,27 +285,44 @@ if __name__ == '__main__':
     #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
-    goal_conf_to_permute = {#"exploit_dist": [0.1, 0.2],
+    goal_conf_to_permute = {"exploit_dist": [0.1, 0.2],
                             "component_weights": [[1, 1, 5, 1, 1],
                                                   [1, 1, 5, 1, 2],
                                                   [1, 1, 5, 1, 5],
+                                                  [1, 1, 5, 1, 20],
                                                   [1, 0.2, 5, 1, 1],
                                                   [1, 0.2, 5, 1, 2],
                                                   [1, 0.2, 5, 1, 5],
+                                                  [1, 0.2, 5, 1, 20],
                                                   ],
                             }
+    env_params = {"harder_start": [0.1],
+                  }
 
-    params_to_permute = {"experiment": ["exp1", "exp2", "exp3", "exp4", "exp5",],
+    params_to_permute = {"experiment": ["exp1", "exp2", "exp3", "exp4", "exp5", ],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
                          "steps": [20000],
                          "goal_weight": [1.0],
-                         "goal_selection_params": named_permutations(goal_conf_to_permute)}
+                         "goal_selection_params": named_permutations(goal_conf_to_permute),
+                         "env_params": named_permutations(env_params)}
 
     experiment_list = named_permutations(params_to_permute)
-    for conf in experiment_list:
+    print(f"{len(experiment_list)} experiments queued up to be run")
+    total_time = 0 # in seconds
+    for i, conf in enumerate(experiment_list):
         print("Training with configuration: " + str(conf))
+        start_time = time.time()
         train(**conf)
+        time_used = time.time() - start_time
+        total_time += time_used
+        part_time = time.strftime('%H:%M:%S', time.gmtime(time_used))
+        print(f"--- latest experiment took {part_time} ---")
+        total_estimate = total_time/(i+1) * len(experiment_list)
+        completed_time = time.strftime('%H:%M:%S', time.gmtime(total_time))
+        total_time = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
+        print(f"--- {i+1}/{len(experiment_list)} experiments have been " \
+            + f"completed in {completed_time}/{total_time} (total time estimated) ---")
 
     # for conf in product(fixed_goal_fractions, experiments):
     #     print("Training with configuration: " + str(conf))
