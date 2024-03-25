@@ -320,9 +320,9 @@ if __name__ == '__main__':
         print(f"--- latest experiment took {part_time} ---")
         total_estimate = total_time/(i+1) * len(experiment_list)
         completed_time = time.strftime('%H:%M:%S', time.gmtime(total_time))
-        total_time = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
+        total_time_estimate = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
         print(f"--- {i+1}/{len(experiment_list)} experiments have been " \
-            + f"completed in {completed_time}/{total_time} (total time estimated) ---")
+            + f"completed in {completed_time}/{total_time_estimate} (total time estimated) ---")
 
     # for conf in product(fixed_goal_fractions, experiments):
     #     print("Training with configuration: " + str(conf))

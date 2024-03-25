@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import csv
 
-with open('/shared-folder/temp/wrapper/SparsePendulumEnv-v1/20000steps_1.0goalrewardWeight_0.0fixedGoalFraction_[1,1,5,1,20]component_weights/test1/eval_logs/goal_component_map.txt', newline='') as csvfile:
+with open('/shared-folder/output/wrapper/SparsePendulumEnv-v1/20000steps_1.0goalrewardWeight_0.0fixedGoalFraction_[1,1,5,1,1]component_weights/exp1/eval_logs/goal_component_map.txt', newline='') as csvfile:
 
     reader = csv.reader(filter(lambda row: row[0]!='#', csvfile),
                         delimiter=' ',
