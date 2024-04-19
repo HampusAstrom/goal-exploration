@@ -5,8 +5,9 @@ import matplotlib.pyplot as plt
 from itertools import product
 import inspect
 import json
+import utils
 
-from stable_baselines3 import SAC, HerReplayBuffer
+from stable_baselines3 import SAC, HerReplayBuffer, DQN
 from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
@@ -20,6 +21,7 @@ import time
 from goal_wrapper import GoalWrapper, FiveXGoalSelection
 
 from sparse_pendulum import SparsePendulumEnv
+from pathological_mc import PathologicalMountainCarEnv
 
 class MapGoalComponentsCallback(BaseCallback):
     def __init__(self, log_path, eval_points, dimension_names, eval_freq, goal_selector, verbose=0):
@@ -68,7 +70,7 @@ def train(base_path: str = "./output/wrapper/",
           env_params: dict = None,
          ):
 
-    env_id = "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
+    env_id = "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
     base_path = os.path.join(base_path,env_id)
     n_training_envs = 1
     n_eval_envs = 5
@@ -105,7 +107,7 @@ def train(base_path: str = "./output/wrapper/",
 
     # Initialize a training environment with default parameters
     #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0, vec_env_cls=SubprocVecEnv)
-    train_env = gym.make(env_id, **env_params)
+    train_env = gym.make(env_id, **env_params) #, render_mode='human')
     if train_seed is not None:
         train_env.reset(seed=train_seed)
 
@@ -114,7 +116,14 @@ def train(base_path: str = "./output/wrapper/",
     train_env = Monitor(train_env_goal, log_dir)
     #train_env = VecMonitor(train_env, log_dir)
 
-    fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
+    if env_id == "SparsePendulumEnv-v1":
+        fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
+        coord_names = ["x", "y", "ang. vel."]
+        algo = SAC
+    elif env_id == "PathologicalMountainCar-v1":
+        fixed_goal = lambda obs: np.array([-1.6, 0.0,])
+        coord_names = ["xpos", "velocity"]
+        algo = DQN
 
     # Create log dir where evaluation results will be saved
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
@@ -151,7 +160,7 @@ def train(base_path: str = "./output/wrapper/",
     # TODO change here from Her buffer or just run without
     # without goal conditioning (but still truncated and hardstart)
     # could hack compute reward but that is probably just confusing
-    model = SAC("MultiInputPolicy",
+    model = algo("MultiInputPolicy",
                 train_env,
                 replay_buffer_class=HerReplayBuffer,
                 replay_buffer_kwargs=dict(
@@ -212,21 +221,24 @@ def train(base_path: str = "./output/wrapper/",
     # TODO move plots to dedicated file and make generic with obs dims
     targeted_goals = np.stack(train_env_goal.targeted_goals)
     print(targeted_goals)
-    fig = plt.figure()
-    ax = fig.add_subplot(221)
-    ax.plot(targeted_goals[:,0], targeted_goals[:,1], "o")
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax = fig.add_subplot(222)
-    ax.plot(targeted_goals[:,0], targeted_goals[:,2], "o")
-    ax.set_xlabel("x")
-    ax.set_ylabel("angular speed")
-    ax = fig.add_subplot(223)
-    ax.plot(targeted_goals[:,1], targeted_goals[:,2], "o"   )
-    ax.set_xlabel("y")
-    ax.set_ylabel("angular speed")
-    plt.tight_layout()
-    plt.savefig(os.path.join(base_path, options, experiment,"goal_spread"))
+    # fig = plt.figure()
+    # ax = fig.add_subplot(221)
+    # ax.plot(targeted_goals[:,0], targeted_goals[:,1], "o")
+    # ax.set_xlabel("x")
+    # ax.set_ylabel("y")
+    # ax = fig.add_subplot(222)
+    # ax.plot(targeted_goals[:,0], targeted_goals[:,2], "o")
+    # ax.set_xlabel("x")
+    # ax.set_ylabel("angular speed")
+    # ax = fig.add_subplot(223)
+    # ax.plot(targeted_goals[:,1], targeted_goals[:,2], "o"   )
+    # ax.set_xlabel("y")
+    # ax.set_ylabel("angular speed")
+    # plt.tight_layout()
+    # plt.savefig(os.path.join(base_path, options, experiment,"goal_spread"))
+    utils.plot_targeted_goals(targeted_goals,
+                              coord_names,
+                              os.path.join(base_path, options, experiment))
     np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
 
 
@@ -285,24 +297,23 @@ if __name__ == '__main__':
     #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
-    goal_conf_to_permute = {"exploit_dist": [0.1, 0.2],
-                            "component_weights": [[1, 1, 5, 1, 1],
-                                                  [1, 1, 5, 1, 2],
-                                                  [1, 1, 5, 1, 5],
-                                                  [1, 1, 5, 1, 20],
-                                                  [1, 0.2, 5, 1, 1],
-                                                  [1, 0.2, 5, 1, 2],
-                                                  [1, 0.2, 5, 1, 5],
-                                                  [1, 0.2, 5, 1, 20],
+    goal_conf_to_permute = {"exploit_dist": [0.05,],
+                            "component_weights": [[1, 0, 0, 0, 0],
+                                                  [0, 1, 0, 0, 0],
+                                                  [0, 0, 1, 0, 0],
+                                                  [0, 0, 0, 0, 1],
+                                                  [1, 0, 0, 0, 1],
+                                                  [0, 1, 0, 0, 1],
                                                   ],
                             }
-    env_params = {"harder_start": [0.1],
+    env_params = {#"harder_start": [0.1],
+                  "terminate": [False]
                   }
 
-    params_to_permute = {"experiment": ["exp1", "exp2", "exp3", "exp4", "exp5", ],
+    params_to_permute = {"experiment": ["exp1",], # "exp2", "exp3", "exp4", "exp5", ],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
-                         "steps": [20000],
+                         "steps": [500000],
                          "goal_weight": [1.0],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params)}
