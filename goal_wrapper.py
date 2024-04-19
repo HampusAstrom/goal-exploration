@@ -315,16 +315,22 @@ class FiveXGoalSelection():
         exclusion_contrib = np.sum(exclusion_per_target, 0)
 
         # get explain component
-        explain_contrib = self.inverse_distance_weighting_capped(seen_dists,
-                                                                 int_rewards,
-                                                                 self.explain_dist)
+        if self.explain_dist <= 0:
+            explain_contrib = self.inverse_distance_weighting(seen_dists,
+                                                              int_rewards)
+        else:
+            explain_contrib = self.inverse_distance_weighting_capped(seen_dists,
+                                                                     int_rewards,
+                                                                     self.explain_dist)
 
         # get exploit component
-        exploit_contrib = self.inverse_distance_weighting_capped(seen_dists,
-                                                                 ext_rewards,
-                                                                 self.exploit_dist)
-
-        # TODO make it easy to choose capped and non-capped exploit/explain
+        if self.exploit_dist <= 0:
+            exploit_contrib = self.inverse_distance_weighting(seen_dists,
+                                                              ext_rewards)
+        else:
+            exploit_contrib = self.inverse_distance_weighting_capped(seen_dists,
+                                                                    ext_rewards,
+                                                                    self.exploit_dist)
 
         components_for_candidates = np.array([self.component_weights[0] * min_dist_to_any,
                                      self.component_weights[1] * goldilocks,
