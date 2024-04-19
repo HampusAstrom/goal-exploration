@@ -1,0 +1,18 @@
+name: goal-exp-cur
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - scipy
+  - matplotlib
+  - gymnasium
+  - pygame
+  - pytorch
+  - pandas
+  - tqdm
+  - rich
+  - pip
+  - pip:
+    - "--editable=git+https://github.com/RLE-Foundation/rllte.git#egg=rllte-core"
+    #- "--editable=git+https://github.com/RLE-Foundation/RLeXplore.git#egg=rlexplore"
