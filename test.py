@@ -123,3 +123,20 @@ for combs in product (*params_to_permute.values()):
     dct = {ele: cnt for ele, cnt in zip(params_to_permute, combs)}
     print(dct)
     test_func(**dct)
+
+# plot regular mountain car vs "pathological"
+x = np.linspace(-1.7, 0.6, 100)
+s = np.sin(3*x)/3
+#p = ((-x**3) +(4*x**2)-4)*0.01
+a = np.sin(3*x)/3-(0.15*x)
+fig = plt.figure()
+ax = fig.add_subplot(111)
+plt.plot(x, s, label="sin")
+plt.plot(x, a, label="alternate1")
+#plt.plot(x, p, label="patho")
+plt.savefig("view_car_plots")
+
+max_s = x[np.argmax(s[:50])]
+max_a = x[np.argmax(a[:50])]
+print(max_s)
+print(max_a)
