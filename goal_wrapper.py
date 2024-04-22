@@ -171,6 +171,7 @@ class FiveXGoalSelection():
                  targeted_goals_list,
                  num_candidates = 10,
                  component_weights = [1, 1, 5, 1, 1],
+                 expand_dist = 0.1,
                  explain_dist = 0.1,
                  exploit_dist = 0.1,) -> None:
         self.env = env
@@ -179,6 +180,7 @@ class FiveXGoalSelection():
         self.components_for_candidates = []
         self.num_candidates = num_candidates
         self.component_weights = component_weights
+        self.expand_dist = expand_dist
         self.explain_dist = explain_dist
         self.exploit_dist = exploit_dist
 
@@ -203,12 +205,12 @@ class FiveXGoalSelection():
         return np.array(ret)
 
     @staticmethod
-    def goldilocks(dists):
+    def goldilocks(dists, expand_dist):
         # assumes normalized dimensions
         # TODO make a tunable or adapt on their own based on experience
         # TODO determine if this function is too "flat"? maybe replace with
         # gaussian
-        a = 0.1 # sets distance for maximum, with a max value of 1
+        a = expand_dist # sets distance for maximum, with a max value of 1
         beta = 1/a**2
         alpha = 2/a
         return np.maximum(alpha*dists - beta*dists**2, 0)
@@ -302,7 +304,7 @@ class FiveXGoalSelection():
 
         # get expand (goldilocks) component
         min_dist_to_seen = np.min(seen_dists, 0)
-        goldilocks = self.goldilocks(min_dist_to_seen)
+        goldilocks = self.goldilocks(min_dist_to_seen, self.expand_dist)
 
         # get exclude component
         # TODO discount exclusion over time
