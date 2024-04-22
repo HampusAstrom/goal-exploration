@@ -73,6 +73,9 @@ class GoalWrapper(
         # seen goals can maybe just we replay buffer from policy algorithm
         # TODO replace with flexible solution
         self.targeted_goals = []
+        self.steps_taken = 0
+        self.num_timesteps = 0
+        self.currsteps_per_episode = []
 
     def step(
             self,
@@ -80,6 +83,7 @@ class GoalWrapper(
             ):
             #) -> tuple[WrapperObsType, SupportsFloat, bool, bool, dict[str, Any]]: # TODO remove or fix imports of types and such
         obs, reward, terminated, truncated, info = self.env.step(action)
+        self.num_timesteps += 1
 
         # get goal conditioned reward
         goal_reward = self.compute_reward(obs, self.goal, info)
@@ -100,6 +104,10 @@ class GoalWrapper(
 
     def reset(self, **kwargs):
         obs, reset_info = self.env.reset(**kwargs)
+        if self.num_timesteps > 0:
+            self.steps_taken += self.num_timesteps
+            self.currsteps_per_episode.append(self.steps_taken)
+        self.num_timesteps = 0
         self.goal = self.select_goal(obs) # goal selection can require obs info
 
         self.targeted_goals.append(self.goal)
@@ -173,7 +181,8 @@ class FiveXGoalSelection():
                  component_weights = [1, 1, 5, 1, 1],
                  expand_dist = 0.1,
                  explain_dist = 0.1,
-                 exploit_dist = 0.1,) -> None:
+                 exploit_dist = 0.1,
+                 steps_halflife = 1000,) -> None:
         self.env = env
         self.replay_buffer = replay_buffer
         self.targeted_goals = targeted_goals_list
@@ -183,6 +192,7 @@ class FiveXGoalSelection():
         self.expand_dist = expand_dist
         self.explain_dist = explain_dist
         self.exploit_dist = exploit_dist
+        self.steps_halflife = steps_halflife
 
     def norm_each_dim(self, array):
         # normalizes each sample in array to be on the range of 0-1 in each dimension
@@ -290,6 +300,17 @@ class FiveXGoalSelection():
         seen_goals = self.norm_each_dim(observations)
         targeted_goals = self.norm_each_dim(self.targeted_goals)
 
+        # if using method for eval, latest episode is probably not finished
+        if len(self.env.currsteps_per_episode) < len(targeted_goals):
+            cum_l = np.stack(self.env.currsteps_per_episode + \
+                [self.env.steps_taken + self.env.num_timesteps])
+        else:
+            cum_l = np.stack(self.env.currsteps_per_episode)
+
+        assert len(cum_l) == len(targeted_goals)
+
+        goal_decay = 0.5**((cum_l[-1] - cum_l)/self.steps_halflife)
+
         # calc distance between each candidate and each previous goals
         seen_dists = scipy.spatial.distance.cdist(seen_goals,n_candidate_points)
         targeted_dists = scipy.spatial.distance.cdist(targeted_goals,n_candidate_points)
@@ -307,14 +328,12 @@ class FiveXGoalSelection():
         goldilocks = self.goldilocks(min_dist_to_seen, self.expand_dist)
 
         # get exclude component
-        # TODO discount exclusion over time
-        # for now we make it a mean (by dividing by number of targeted goals)
-        # the size of each exclusion on average shrinks with new data, that
-        # should be enough
         targeted2seen_dists = scipy.spatial.distance.cdist(seen_goals,targeted_goals)
         exclusion_sizes = np.min(targeted2seen_dists, 0)
         exclusion_per_target = - np.maximum(1-targeted_dists/exclusion_sizes[:, None], 0)
-        exclusion_contrib = np.sum(exclusion_per_target, 0)
+        exclusion_decayed = exclusion_per_target*goal_decay[:, None]
+        exclusion_contrib = np.sum(exclusion_decayed, 0)
+        #exclusion_contrib = np.sum(exclusion_per_target, 0)
 
         # get explain component
         if self.explain_dist <= 0:

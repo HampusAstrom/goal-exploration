@@ -57,7 +57,7 @@ class MapGoalComponentsCallback(BaseCallback):
         return True # never stop training
 
 
-def train(base_path: str = "./output/wrapper/",
+def train(base_path: str = "./data/wrapper/",
           steps: int = 10000,
           experiment: str = "exp1",
           goal_weight: float = 0.5,
@@ -298,13 +298,10 @@ if __name__ == '__main__':
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
     goal_conf_to_permute = {"exploit_dist": [0.05,],
-                            "component_weights": [[1, 0, 0, 0, 0],
-                                                  [0, 1, 0, 0, 0],
-                                                  [0, 0, 1, 0, 0],
-                                                  [0, 0, 0, 0, 1],
-                                                  [1, 0, 0, 0, 1],
-                                                  [0, 1, 0, 0, 1],
+                            "expand_dist": [0.01, 0.05, 0.1, 0.2],
+                            "component_weights": [[0, 1, 0, 0, 10],
                                                   ],
+                            "steps_halflife": [1000],
                             }
     env_params = {#"harder_start": [0.1],
                   "terminate": [False]
@@ -324,7 +321,8 @@ if __name__ == '__main__':
     for i, conf in enumerate(experiment_list):
         print("Training with configuration: " + str(conf))
         start_time = time.time()
-        train(**conf)
+        train(base_path = "./temp/wrapper/",
+              **conf)
         time_used = time.time() - start_time
         total_time += time_used
         part_time = time.strftime('%H:%M:%S', time.gmtime(time_used))
