@@ -46,9 +46,9 @@ class GoalWrapper(
         # TODO this supports inputing a reward function from the outside, but we should
         # proabaly also support selecting different strategies in this code with sting arguments
         if reward_func is None:
-            self.compute_reward = self.flatten_norm_reward
+            self.goal_reward = self.flatten_norm_reward
         else:
-            self.compute_reward = reward_func
+            self.goal_reward = reward_func
 
         self.selection_strategies = None
         self.strat_weights = None
@@ -86,17 +86,17 @@ class GoalWrapper(
         self.num_timesteps += 1
 
         # get goal conditioned reward
-        goal_reward = self.compute_reward(obs, self.goal, info)
+        goal_reward = self.goal_reward(obs, self.goal, info)
         gw = self.goal_weight
+        # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
         totreward = gw*goal_reward + (1-gw)*reward
 
         # save separate rewards in info
-        assert info.get("extrinsic_reward") == None
         assert info.get("goal_reward") == None
-        info["extrinsic_reward"] = reward
         info["goal_reward"] = goal_reward
-        # TODO add intrinsic reaward here, unless already added by lower wrapper?
+        assert info.get("extrinsic_reward") == None
+        info["extrinsic_reward"] = reward
 
         #self.seen_goals.append(obs)
 
@@ -121,6 +121,19 @@ class GoalWrapper(
         # same as regular obs, for efficent memory usage
         return {"observation": obs, "achieved_goal": obs, "desired_goal": self.goal}
 
+    def compute_reward(self,
+                       achieved_goal,
+                       desired_goal,
+                       info,
+                       ):
+        # get goal conditioned reward
+        goal_reward = self.goal_reward(achieved_goal, desired_goal, info)
+        gw = self.goal_weight
+        # TODO add intrinsic reaward here, unless already added by lower wrapper?
+        # output weighted average of rewards
+        er = np.array([dct["extrinsic_reward"] for dct in info])
+        return gw*goal_reward + (1-gw)*er
+
     def set_goal_strategies(self, goal_selection_strategies, goal_sel_strat_weight=None):
         # if list of selection strategies but not weights, uniform is assumed
         self.selection_strategies = goal_selection_strategies
@@ -140,7 +153,7 @@ class GoalWrapper(
         print("goal selection method: " + str(self.select_goal))
         print("goal selection strategies: " + str(self.selection_strategies))
         print("goal selection strategy weights: " + str(self.strat_weights))
-        print("goal reward function: " + str(self.compute_reward))
+        print("goal reward function: " + str(self.goal_reward))
         print()
 
     def sample_obs_goal(self, obs = None):
