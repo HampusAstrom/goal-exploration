@@ -328,6 +328,7 @@ class FiveXGoalSelection():
         goldilocks = self.goldilocks(min_dist_to_seen, self.expand_dist)
 
         # get exclude component
+        # TODO this might be the slowest part, maybe save between steps
         targeted2seen_dists = scipy.spatial.distance.cdist(seen_goals,targeted_goals)
         exclusion_sizes = np.min(targeted2seen_dists, 0)
         exclusion_per_target = - np.maximum(1-targeted_dists/exclusion_sizes[:, None], 0)

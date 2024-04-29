@@ -68,9 +68,10 @@ def train(base_path: str = "./data/wrapper/",
           device = None,
           goal_selection_params: dict = None,
           env_params: dict = None,
+          env_id = "PathologicalMountainCar-v1",
+          baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
          ):
 
-    env_id = "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
     base_path = os.path.join(base_path,env_id)
     n_training_envs = 1
     n_eval_envs = 5
@@ -81,15 +82,23 @@ def train(base_path: str = "./data/wrapper/",
     # Collect variables to store in json before cluttered
     conf_params = locals()
 
-    options = str(steps) + "steps_" \
-            + str(goal_weight) + "goalrewardWeight_" \
-            + str(fixed_goal_fraction) + "fixedGoalFraction"
+    if baseline_override is None:
+        options = str(steps) + "steps_" \
+                + str(goal_weight) + "goalrewardWeight_" \
+                + str(fixed_goal_fraction) + "fixedGoalFraction"
 
-    for key, val in goal_selection_params.items():
-        if type(val) is list:
-            options += "_[" + ",".join(str(v) for v in val) + "]" + key
-        else:
-            options += "_" + str(val) + key
+        for key, val in goal_selection_params.items():
+            if type(val) is list:
+                options += "_[" + ",".join(str(v) for v in val) + "]" + key
+            else:
+                options += "_" + str(val) + key
+    elif baseline_override == "uniform-goal":
+        options = str(steps) + "steps_" \
+                + str(goal_weight) + "goalrewardWeight_" \
+                + baseline_override + "-baseline"
+    else:
+        options = str(steps) + "steps_" \
+                + baseline_override + "-baseline"
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -102,6 +111,13 @@ def train(base_path: str = "./data/wrapper/",
                                      if v.default is not inspect.Parameter.empty}
     merged = default_goal_selection_params | goal_selection_params
     conf_params["goal_selection_params"] = merged
+    if baseline_override is not None:
+        # if making a baseline, some parameters are ignored, remove from conf
+        # for clarity
+        del conf_params["goal_selection_params"]
+        del conf_params["fixed_goal_fraction"]
+    if baseline_override in ["base-rl", "curious"]:
+        del conf_params["goal_weight"]
     with open(os.path.join(base_path, options, experiment, 'config.json'), 'w') as fp:
         json.dump(conf_params, fp, indent=4)
 
@@ -112,7 +128,11 @@ def train(base_path: str = "./data/wrapper/",
         train_env.reset(seed=train_seed)
 
     # wrap with goal conditioning and monitor wrappers
-    train_env_goal = GoalWrapper(train_env, goal_weight=goal_weight)
+    if baseline_override in [None, "uniform-goal"]:
+        # only use when training with goal
+        train_env_goal = GoalWrapper(train_env, goal_weight=goal_weight)
+    else:
+        train_env_goal = train_env # TODO handle that this name becomes missleading
     train_env = Monitor(train_env_goal, log_dir)
     #train_env = VecMonitor(train_env, log_dir)
 
@@ -140,7 +160,9 @@ def train(base_path: str = "./data/wrapper/",
     # for eval we want to always evaluate with the goal at the top
     # if weight should be 0 (using real reward, or 1 using goal reward, or a mixture like
     # in training can be discussed)
-    eval_env = GoalWrapper(eval_env, goal_weight=1, goal_selection_strategies=fixed_goal)
+    if baseline_override in [None, "uniform-goal"]:
+        # only evaluate with goal when training with goal
+        eval_env = GoalWrapper(eval_env, goal_weight=1, goal_selection_strategies=fixed_goal)
     eval_env = Monitor(eval_env, eval_log_dir)
 
     # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -157,17 +179,24 @@ def train(base_path: str = "./data/wrapper/",
 
     #check_env(train_env)
 
+    if baseline_override in [None, "uniform-goal"]:
+        # only use HER buffer when training with goal
+        policy = "MultiInputPolicy"
+        algo_kwargs = {"replay_buffer_class": HerReplayBuffer,
+                       "replay_buffer_kwargs": dict(
+                       n_sampled_goal=n_sampled_goal,
+                       goal_selection_strategy="future",
+                       copy_info_dict=True,),
+                       }
+    else:
+        policy = "MlpPolicy"
+        algo_kwargs = {}
     # TODO change here from Her buffer or just run without
     # without goal conditioning (but still truncated and hardstart)
     # could hack compute reward but that is probably just confusing
-    model = algo("MultiInputPolicy",
+    model = algo(policy,
                 train_env,
-                replay_buffer_class=HerReplayBuffer,
-                replay_buffer_kwargs=dict(
-                    n_sampled_goal=n_sampled_goal,
-                    goal_selection_strategy="future",
-                    copy_info_dict=True,
-                ),
+                **algo_kwargs,
                 learning_starts=300,
                 verbose=1,
                 buffer_size=int(1e6),
@@ -178,37 +207,45 @@ def train(base_path: str = "./data/wrapper/",
                 seed=policy_seed,
                 device=device,
     )
-    # TODO a smart goal selection needs access to buffer of seen states and of targeted goals
-    # policy algorithm can be mostly separate, but we should link up with its buffer when it exists
-    # and create one otherwise. We should therefore set goal strategy here after model is setup I guess
-    # removes some nice separation, but is maybe ok for now?
-    # Also, when we replace the set of all seen states with a downsamples proxy, this might be more clear
-    # train_env_goal.link_buffer(model.replay_buffer)
-    if goal_selection_params is not None: # assumes that all keys are params to func
-        goal_selection = FiveXGoalSelection(train_env_goal,
-                                            model.replay_buffer,
-                                            train_env_goal.targeted_goals,
-                                            **goal_selection_params)
+
+    if baseline_override is None:
+        # TODO a smart goal selection needs access to buffer of seen states and of targeted goals
+        # policy algorithm can be mostly separate, but we should link up with its buffer when it exists
+        # and create one otherwise. We should therefore set goal strategy here after model is setup I guess
+        # removes some nice separation, but is maybe ok for now?
+        # Also, when we replace the set of all seen states with a downsamples proxy, this might be more clear
+        # train_env_goal.link_buffer(model.replay_buffer)
+        if goal_selection_params is not None: # assumes that all keys are params to func
+            goal_selection = FiveXGoalSelection(train_env_goal,
+                                                model.replay_buffer,
+                                                train_env_goal.targeted_goals,
+                                                **goal_selection_params)
+        else:
+            goal_selection = FiveXGoalSelection(train_env_goal,
+                                                model.replay_buffer,
+                                                train_env_goal.targeted_goals)
+
+        value_map_grid = goal_selection.grid_of_points(10)
+        mapping_callback = MapGoalComponentsCallback(log_path=eval_log_dir,
+                                                    eval_points=value_map_grid,
+                                                    eval_freq=max(500 // n_training_envs, 1),
+                                                    goal_selector=goal_selection,
+                                                    dimension_names="x, y, theta,"
+                                                    )
+
+        callback = CallbackList([mapping_callback, eval_callback])
+
+        #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
+        goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
+        goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
+        train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
+        train_env_goal.print_setup()
+    elif baseline_override == "uniform-goal":
+        callback = eval_callback
+        train_env_goal.set_goal_strategies([train_env_goal.sample_obs_goal])
+        train_env_goal.print_setup()
     else:
-        goal_selection = FiveXGoalSelection(train_env_goal,
-                                            model.replay_buffer,
-                                            train_env_goal.targeted_goals)
-
-    value_map_grid = goal_selection.grid_of_points(10)
-    mapping_callback = MapGoalComponentsCallback(log_path=eval_log_dir,
-                                                 eval_points=value_map_grid,
-                                                 eval_freq=max(500 // n_training_envs, 1),
-                                                 goal_selector=goal_selection,
-                                                 dimension_names="x, y, theta,"
-                                                 )
-
-    callback = CallbackList([mapping_callback, eval_callback])
-
-    #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
-    goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
-    goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
-    train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
-    train_env_goal.print_setup()
+        callback = eval_callback
 
     start_time = time.time()
     model.learn(steps, callback=callback, progress_bar=True)
@@ -218,28 +255,13 @@ def train(base_path: str = "./data/wrapper/",
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
 
-    # TODO move plots to dedicated file and make generic with obs dims
-    targeted_goals = np.stack(train_env_goal.targeted_goals)
-    print(targeted_goals)
-    # fig = plt.figure()
-    # ax = fig.add_subplot(221)
-    # ax.plot(targeted_goals[:,0], targeted_goals[:,1], "o")
-    # ax.set_xlabel("x")
-    # ax.set_ylabel("y")
-    # ax = fig.add_subplot(222)
-    # ax.plot(targeted_goals[:,0], targeted_goals[:,2], "o")
-    # ax.set_xlabel("x")
-    # ax.set_ylabel("angular speed")
-    # ax = fig.add_subplot(223)
-    # ax.plot(targeted_goals[:,1], targeted_goals[:,2], "o"   )
-    # ax.set_xlabel("y")
-    # ax.set_ylabel("angular speed")
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(base_path, options, experiment,"goal_spread"))
-    utils.plot_targeted_goals(targeted_goals,
-                              coord_names,
-                              os.path.join(base_path, options, experiment))
-    np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
+    if baseline_override in [None, "uniform-goal"]:
+        targeted_goals = np.stack(train_env_goal.targeted_goals)
+        print(targeted_goals)
+        utils.plot_targeted_goals(targeted_goals,
+                                coord_names,
+                                os.path.join(base_path, options, experiment))
+        np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
 
 
 #model.load(model_path, eval_env)
@@ -297,23 +319,31 @@ if __name__ == '__main__':
     #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
-    goal_conf_to_permute = {"exploit_dist": [0.05,],
-                            "expand_dist": [0.01, 0.05, 0.1, 0.2],
-                            "component_weights": [[0, 1, 0, 0, 10],
+    goal_conf_to_permute = {"exploit_dist": [0.2,],
+                            "expand_dist": [0.01,],
+                            "component_weights": [[0.1, 1, 1, 0, 10],
+                                                  #[0.1, 1, 5, 0, 10],
                                                   ],
-                            "steps_halflife": [1000],
+                            "steps_halflife": [1000,],
                             }
     env_params = {#"harder_start": [0.1],
                   "terminate": [False]
                   }
 
-    params_to_permute = {"experiment": ["exp1",], # "exp2", "exp3", "exp4", "exp5", ],
+    params_to_permute = {"experiment": ["exp1", #"exp2", "exp3", "exp4", "exp5",
+                                        #"exp6", "exp7", "exp8", "exp9", "exp10",
+                                        #"exp11", "exp12", "exp13", "exp14", "exp15",
+                                        #"exp16", "exp17", "exp18", "exp19", "exp20",
+                                        ],
+                         "env_id": ["PathologicalMountainCar-v1",], # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
                          "steps": [500000],
                          "goal_weight": [1.0],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
-                         "env_params": named_permutations(env_params)}
+                         "env_params": named_permutations(env_params),
+                         "baseline_override": [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
+                         }
 
     experiment_list = named_permutations(params_to_permute)
     print(f"{len(experiment_list)} experiments queued up to be run")
