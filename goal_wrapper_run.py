@@ -61,6 +61,7 @@ def train(base_path: str = "./data/wrapper/",
           steps: int = 10000,
           experiment: str = "exp1",
           goal_weight: float = 0.5,
+          goal_range: float = -1,
           eval_seed: int = None,
           train_seed: int = None,
           policy_seed: int = None,
@@ -85,7 +86,8 @@ def train(base_path: str = "./data/wrapper/",
     if baseline_override is None:
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
-                + str(fixed_goal_fraction) + "fixedGoalFraction"
+                + str(fixed_goal_fraction) + "fixedGoalFraction_" \
+                + str(goal_range) + "goal_range"
 
         for key, val in goal_selection_params.items():
             if type(val) is list:
@@ -95,6 +97,7 @@ def train(base_path: str = "./data/wrapper/",
     elif baseline_override == "uniform-goal":
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
+                + str(goal_range) + "goal_range" \
                 + baseline_override + "-baseline"
     else:
         options = str(steps) + "steps_" \
@@ -130,7 +133,11 @@ def train(base_path: str = "./data/wrapper/",
     # wrap with goal conditioning and monitor wrappers
     if baseline_override in [None, "uniform-goal"]:
         # only use when training with goal
-        train_env_goal = GoalWrapper(train_env, goal_weight=goal_weight)
+        train_env_goal = GoalWrapper(train_env,
+                                     goal_weight=goal_weight,
+                                     goal_range=goal_range)
+                                     #intrinsic_curiosity_module=ICM(train_env,
+                                     #                               device))
     else:
         train_env_goal = train_env # TODO handle that this name becomes missleading
     train_env = Monitor(train_env_goal, log_dir)
@@ -162,7 +169,10 @@ def train(base_path: str = "./data/wrapper/",
     # in training can be discussed)
     if baseline_override in [None, "uniform-goal"]:
         # only evaluate with goal when training with goal
-        eval_env = GoalWrapper(eval_env, goal_weight=1, goal_selection_strategies=fixed_goal)
+        eval_env = GoalWrapper(eval_env,
+                               goal_weight=0,
+                               goal_range=goal_range,
+                               goal_selection_strategies=fixed_goal)
     eval_env = Monitor(eval_env, eval_log_dir)
 
     # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
@@ -340,6 +350,7 @@ if __name__ == '__main__':
                          "device": ["cuda"],
                          "steps": [500000],
                          "goal_weight": [1.0],
+                         "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
                          "baseline_override": [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None

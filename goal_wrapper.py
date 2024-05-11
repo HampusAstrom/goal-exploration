@@ -28,6 +28,7 @@ class GoalWrapper(
             self,
             env: gym.Env,
             goal_weight: float=0.5,
+            goal_range: float=-1,
             reward_func = None, # TODO make type hint with Callable
             goal_selection_strategies = None, # TODO make type hint with Callable
             goal_sel_strat_weight = None,
@@ -41,6 +42,7 @@ class GoalWrapper(
 
         assert goal_weight >=0 and goal_weight <= 1
         self.goal_weight = goal_weight
+        self.goal_range = goal_range
         # for now this only supports flattenable observation spaces
         assert self.env.observation_space.is_np_flattenable
         # TODO this supports inputing a reward function from the outside, but we should
@@ -183,7 +185,18 @@ class GoalWrapper(
             flat_goal = flat_goal.reshape(-1, self.goal_dim)
         distance = np.linalg.norm(flat_achi - flat_goal, axis=-1)
         # for now returning dense reward, hard to extimate generic cutoff value
-        return np.exp(-distance)
+        if self.goal_range <= 0:
+            return np.exp(-distance)
+        else:
+            if np.isscalar(distance):
+                if distance <= self.goal_range:
+                    return np.exp(-distance)
+                else:
+                    return 0
+            cut = distance > self.goal_range
+            ret = np.exp(-distance)
+            ret[cut] = 0
+            return ret
 
 class FiveXGoalSelection():
     def __init__(self,
