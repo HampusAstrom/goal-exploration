@@ -38,42 +38,46 @@ def plot_targeted_goals(goals, coord_names, path):
     plt.tight_layout()
     plt.savefig(os.path.join(path,"goal_spread"))
 
-    # x = np.linspace(0, 2 * np.pi, 400)
-    # y = np.sin(x ** 2)
+def get_all_folders(dir):
+    subfolders = [f.path for f in os.scandir(dir) if f.is_dir()]
 
-    # sc = Size.Scaled(1)
-    # fh = Size.Fixed(3.5)
-    # fv = Size.Fixed(2)
+    # for obj in subfolders:
+    #     print(obj)
+    return sorted(subfolders)
 
-    # fig, ax = plt.subplots(2, 2, figsize=(10,6))
-    # h = [sc, fh] * 2 + [sc]
-    # v = [sc, fv] * 2 + [sc]
-    # divider = Divider(fig, (0.0, 0.0, 1., 1.), h, v)
-    # for i in range(2):
-    #     for j in range(2):
-    #         ax[i,j].set_axes_locator(divider.new_locator(nx=2*i+1, ny=2*j+1))
-    # for i in ax.flatten():
-    #     i.plot(x, y)
-    # plt.savefig('f1.pdf')
+def add_subplot(path, window, ax):
+    datas = []
+    experiments = get_all_folders(path)
+    for exp in experiments:
+        data = np.loadtxt(os.path.join(exp, "eval_logs", "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+        #avg_data = np.convolve(data, [1]*window, 'valid')/window
+        datas.append(data)
+    #avg_data = np.mean(datas, axis=0)
+    #avg_std = np.std(datas, axis=0)
+    data = np.mean(datas, axis=0)
+    std = np.std(datas, axis=0)
+    avg_data = np.convolve(data, [1]*window, 'valid')/window
+    avg_std = np.convolve(std, [1]*window, 'valid')/window
+    #x = range(len(avg_data))
+    x = np.linspace(0, len(avg_data)*100, len(avg_data))
+    ax.plot(x, avg_data, label=os.path.basename(path))
+    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03,)
 
-    # fig, ax = plt.subplots(3, 2, figsize=(10,9))
-    # h = [sc, fh] * 2 + [sc]
-    # v = [sc, fv] * 3 + [sc]
-    # divider = Divider(fig, (0.0, 0.0, 1., 1.), h, v)
-    # for i in range(3):
-    #     for j in range(2):
-    #         ax[i,j].set_axes_locator(divider.new_locator(nx=2*j+1, ny=2*i+1))
-    # for i in ax.flatten():
-    #     i.plot(x, y)
-    # plt.savefig('f2.pdf')
+def plot_all_in_folder(dir):
+    subfolders = get_all_folders(dir)
 
-    # fig, ax = plt.subplots(2, 3, figsize=(15,6))
-    # h = [sc, fh] * 3 + [sc]
-    # v = [sc, fv] * 2 + [sc]
-    # divider = Divider(fig, (0.0, 0.0, 1., 1.), h, v)
-    # for i in range(2):
-    #     for j in range(3):
-    #         ax[i,j].set_axes_locator(divider.new_locator(nx=2*j+1, ny=2*i+1))
-    # for i in ax.flatten():
-    #     i.plot(x, y)
-    # plt.savefig('f3.pdf')
+    px = 1/plt.rcParams['figure.dpi']
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
+    window = 10
+
+    for folder in subfolders:
+        add_subplot(folder, window, ax)
+
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.set_xlabel("steps")
+    ax.set_ylabel("reward")
+    #ax.set_ylim(-100, 200)
+    fig.tight_layout()
+    plt.savefig(os.path.join(dir, "eval_results"))
+
+plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1")
