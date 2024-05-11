@@ -69,7 +69,7 @@ def train(base_path: str = "./data/wrapper/",
           device = None,
           goal_selection_params: dict = None,
           env_params: dict = None,
-          env_id = "PathologicalMountainCar-v1",
+          env_id = "PathologicalMountainCar-v1.1",
           baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
          ):
 
@@ -147,7 +147,7 @@ def train(base_path: str = "./data/wrapper/",
         fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
         coord_names = ["x", "y", "ang. vel."]
         algo = SAC
-    elif env_id == "PathologicalMountainCar-v1":
+    elif env_id == "PathologicalMountainCar-v1.1":
         fixed_goal = lambda obs: np.array([-1.6, 0.0,])
         coord_names = ["xpos", "velocity"]
         algo = DQN
@@ -337,7 +337,7 @@ if __name__ == '__main__':
                             "steps_halflife": [1000,],
                             }
     env_params = {#"harder_start": [0.1],
-                  "terminate": [False]
+                  "terminate": [True]
                   }
 
     params_to_permute = {"experiment": ["exp1", #"exp2", "exp3", "exp4", "exp5",
@@ -345,7 +345,7 @@ if __name__ == '__main__':
                                         #"exp11", "exp12", "exp13", "exp14", "exp15",
                                         #"exp16", "exp17", "exp18", "exp19", "exp20",
                                         ],
-                         "env_id": ["PathologicalMountainCar-v1",], # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
+                         "env_id": ["PathologicalMountainCar-v1.1",], # "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
                          "steps": [500000],

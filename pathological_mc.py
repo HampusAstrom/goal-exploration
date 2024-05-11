@@ -11,7 +11,7 @@ from gymnasium.envs.registration import register
 # Example for the CartPole environment
 register(
     # unique identifier for the env `name-version`
-    id="PathologicalMountainCar-v1",
+    id="PathologicalMountainCar-v1.1",
     # path to the class for creating the env
     # Note: entry_point also accept a class as input (and not only a string)
     entry_point="pathological_mc:PathologicalMountainCarEnv",
@@ -57,23 +57,20 @@ class PathologicalMountainCarEnv(MountainCarEnv):
         if self.terminate:
             # lets try with termination later
             terminated = bool(
-                position >= self.goal_position and velocity >= self.goal_velocity or
-                position <= self.goal_position_left and velocity >= self.goal_velocity
+                (position >= self.goal_position and velocity >= self.goal_velocity) or
+                (position <= self.goal_position_left and -velocity >= self.goal_velocity)
             )
             reward = -1.0
         else:
             terminated = False
-            reward = 0
+            reward = -1.0
         if position >= self.goal_position and velocity >= self.goal_velocity:
             reward = 10
             #print(f"Low reward found at step {self.counter}")
-        if position <= self.goal_position_left and velocity >= self.goal_velocity:
+        if position <= self.goal_position_left and -velocity >= self.goal_velocity:
             reward = 500
             #print(f"High reward found at step {self.counter}!")
             #exit()
-
-        if terminated:
-            print(f"Terminated at step {self.counter} with reward {reward}")
 
         self.state = (position, velocity)
         if self.render_mode == "human":
