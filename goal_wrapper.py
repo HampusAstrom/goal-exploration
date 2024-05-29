@@ -203,15 +203,19 @@ class FiveXGoalSelection():
                  env,
                  replay_buffer,
                  targeted_goals_list,
+                 train_steps,
                  num_candidates = 10,
                  component_weights = [1, 1, 5, 1, 1],
                  expand_dist = 0.1,
                  explain_dist = 0.1,
                  exploit_dist = 0.1,
-                 steps_halflife = 1000,) -> None:
+                 steps_halflife = 1000,
+                 escalate_exploit = False,
+                 ) -> None:
         self.env = env
         self.replay_buffer = replay_buffer
         self.targeted_goals = targeted_goals_list
+        self.train_steps = train_steps
         self.components_for_candidates = []
         self.num_candidates = num_candidates
         self.component_weights = component_weights
@@ -219,6 +223,7 @@ class FiveXGoalSelection():
         self.explain_dist = explain_dist
         self.exploit_dist = exploit_dist
         self.steps_halflife = steps_halflife
+        self.escalate_exploit = escalate_exploit
 
     def norm_each_dim(self, array):
         # normalizes each sample in array to be on the range of 0-1 in each dimension
@@ -380,11 +385,16 @@ class FiveXGoalSelection():
                                                                     ext_rewards,
                                                                     self.exploit_dist)
 
+        if self.escalate_exploit:
+            exploit_weight = self.component_weights[4] * 2 * cum_l[-1]/self.train_steps
+        else:
+            exploit_weight = self.component_weights[4]
+
         components_for_candidates = np.array([self.component_weights[0] * min_dist_to_any,
                                      self.component_weights[1] * goldilocks,
                                      self.component_weights[2] * exclusion_contrib,
                                      self.component_weights[3] * explain_contrib,
-                                     self.component_weights[4] * exploit_contrib,])
+                                     exploit_weight * exploit_contrib,])
 
         # compine components and select best candidate
         # TODO make an option to only select some components sometimes, possibly

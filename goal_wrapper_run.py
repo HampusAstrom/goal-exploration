@@ -97,7 +97,7 @@ def train(base_path: str = "./data/wrapper/",
     elif baseline_override == "uniform-goal":
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
-                + str(goal_range) + "goal_range" \
+                + str(goal_range) + "goal_range_" \
                 + baseline_override + "-baseline"
     else:
         options = str(steps) + "steps_" \
@@ -161,7 +161,7 @@ def train(base_path: str = "./data/wrapper/",
     #eval_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0)
     #eval_env = GoalPendulumEnv(render_mode="human",
     #                           fixed_goal=np.array([1.0, 0.0, 0.0]))
-    eval_env = gym.make(env_id)#,render_mode="human")
+    eval_env = gym.make(env_id, **env_params)#,render_mode="human")
     if eval_seed is not None:
         eval_env.reset(seed=eval_seed)
     # for eval we want to always evaluate with the goal at the top
@@ -229,11 +229,13 @@ def train(base_path: str = "./data/wrapper/",
             goal_selection = FiveXGoalSelection(train_env_goal,
                                                 model.replay_buffer,
                                                 train_env_goal.targeted_goals,
+                                                train_steps=steps,
                                                 **goal_selection_params)
         else:
             goal_selection = FiveXGoalSelection(train_env_goal,
                                                 model.replay_buffer,
-                                                train_env_goal.targeted_goals)
+                                                train_env_goal.targeted_goals,
+                                                train_steps=steps,)
 
         value_map_grid = goal_selection.grid_of_points(10)
         mapping_callback = MapGoalComponentsCallback(log_path=eval_log_dir,
@@ -243,7 +245,8 @@ def train(base_path: str = "./data/wrapper/",
                                                     dimension_names="x, y, theta,"
                                                     )
 
-        callback = CallbackList([mapping_callback, eval_callback])
+        #callback = CallbackList([mapping_callback, eval_callback])
+        callback = CallbackList([eval_callback])
 
         #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
         goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
@@ -334,7 +337,8 @@ if __name__ == '__main__':
                             "component_weights": [[0.1, 1, 1, 0, 10],
                                                   #[0.1, 1, 5, 0, 10],
                                                   ],
-                            "steps_halflife": [1000,],
+                            "steps_halflife": [500,],
+                            "escalate_exploit": [True],
                             }
     env_params = {#"harder_start": [0.1],
                   "terminate": [True]
