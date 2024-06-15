@@ -17,6 +17,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 #import imageio
 
 import time
+import yappi
 
 from goal_wrapper import GoalWrapper, FiveXGoalSelection
 
@@ -329,6 +330,7 @@ def named_permutations(params_to_permute: dict):
 
 
 if __name__ == '__main__':
+    yappi.start()
     #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
@@ -377,6 +379,9 @@ if __name__ == '__main__':
         total_time_estimate = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
         print(f"--- {i+1}/{len(experiment_list)} experiments have been " \
             + f"completed in {completed_time}/{total_time_estimate} (total time estimated) ---")
+
+    yappi.stop()
+    yappi.get_func_stats().save("./test3.pstats",type="pstat")
 
     # for conf in product(fixed_goal_fractions, experiments):
     #     print("Training with configuration: " + str(conf))
