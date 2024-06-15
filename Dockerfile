@@ -4,6 +4,9 @@ ARG PYTORCH_DEPS=cpuonly
 ARG PYTHON_VERSION=3.10
 ARG MAMBA_DOCKERFILE_ACTIVATE=1  # (otherwise python will not be found)
 
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES graphics,utility,compute,display,video
+
 # Install micromamba env and dependencies
 RUN micromamba install -n base -y python=$PYTHON_VERSION \
     pytorch $PYTORCH_DEPS -c conda-forge -c pytorch -c nvidia && \
