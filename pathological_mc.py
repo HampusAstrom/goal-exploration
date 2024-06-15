@@ -54,23 +54,17 @@ class PathologicalMountainCarEnv(MountainCarEnv):
             velocity = 0
 
         self.counter += 1
-        if self.terminate:
-            # lets try with termination later
-            terminated = bool(
-                (position >= self.goal_position and velocity >= self.goal_velocity) or
-                (position <= self.goal_position_left and -velocity >= self.goal_velocity)
-            )
-            reward = -1.0
-        else:
-            terminated = False
-            reward = -1.0
+
+        terminated = False
+        reward = -1.0
         if position >= self.goal_position and velocity >= self.goal_velocity:
             reward = 10
-            #print(f"Low reward found at step {self.counter}")
+            if self.terminate:
+                terminated = True
         if position <= self.goal_position_left and -velocity >= self.goal_velocity:
             reward = 500
-            #print(f"High reward found at step {self.counter}!")
-            #exit()
+            if self.terminate:
+                terminated = True
 
         self.state = (position, velocity)
         if self.render_mode == "human":
