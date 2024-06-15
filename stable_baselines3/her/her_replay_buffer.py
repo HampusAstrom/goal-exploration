@@ -304,7 +304,8 @@ class HerReplayBuffer(DictReplayBuffer):
         next_obs = {key: obs[batch_indices, env_indices, :] for key, obs in self.next_observations.items()}
         if self.copy_info_dict:
             # The copy may cause a slow down
-            infos = copy.deepcopy(self.infos[batch_indices, env_indices])
+            #infos = copy.deepcopy(self.infos[batch_indices, env_indices])
+            infos = self.infos[batch_indices, env_indices].copy()
         else:
             infos = [{} for _ in range(len(batch_indices))]
         # Sample and set new goals
