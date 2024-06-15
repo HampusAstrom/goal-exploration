@@ -4,6 +4,13 @@ from mpl_toolkits.axes_grid1 import Divider, Size
 import os
 from cycler import cycler
 
+import torch as th
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+from gymnasium.vector import VectorEnv
+import gymnasium as gym
+
+GymObs = Union[th.Tensor, Dict[str, th.Tensor]]
+
 # TODO possibly use jax again?
 def symlog(x):
     return np.sign(x) * np.log(1 + np.abs(x))
@@ -100,3 +107,82 @@ def plot_all_in_folder(dir):
                 goals = np.loadtxt(goal_file, delimiter=' ')#, skiprows=2, usecols=0)
                 plot_targeted_goals(goals, coord_names,exp)
 
+# copied and altered from rllte
+class Gymnasium2Torch(gym.Wrapper):
+    """Env wrapper for processing gymnasium environments and outputting torch tensors.
+
+    Args:
+        env (VectorEnv): The vectorized environments.
+        device (str): Device (cpu, cuda, ...) on which the code should be run.
+        envpool (bool): Whether to use `EnvPool` env.
+
+    Returns:
+        Gymnasium2Torch wrapper.
+    """
+
+    def __init__(self, env: VectorEnv, device: str, envpool: bool = False) -> None:
+        super().__init__(env)
+        #self.num_envs = env.unwrapped.num_envs # TODO solve nicer for all cases
+        self.device = th.device(device)
+
+        # envpool's observation space and action space are the same as the single env.
+        if not envpool:
+            #self.observation_space = env.single_observation_space
+            #self.action_space = env.single_action_space
+            self.observation_space = env.observation_space
+            self.action_space = env.action_space
+
+        if isinstance(self.observation_space, gym.spaces.Dict):
+            self._format_obs = lambda x: {key: th.as_tensor(item, device=self.device) for key, item in x.items()}
+        else:
+            self._format_obs = lambda x: th.as_tensor(x, device=self.device)
+
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[GymObs, Dict]:
+        """Reset all environments and return a batch of initial observations and info.
+
+        Args:
+            seed (int): The environment reset seeds.
+            options (Optional[dict]): If to return the options.
+
+        Returns:
+            First observations and info.
+        """
+        obs, infos = self.env.reset(seed=seed, options=options)
+
+        return self._format_obs(obs), infos
+
+    def step(self, actions: th.Tensor) -> Tuple[GymObs, th.Tensor, th.Tensor, th.Tensor, Dict[str, Any]]:
+        """Take an action for each environment.
+
+        Args:
+            actions (th.Tensor): element of :attr:`action_space` Batch of actions.
+
+        Returns:
+            Next observations, rewards, terminateds, truncateds, infos.
+        """
+        new_observations, rewards, terminateds, truncateds, infos = self.env.step(actions.cpu().numpy())
+        # TODO: get real next observations
+        # for idx, (term, trunc) in enumerate(zip(terminateds, truncateds)):
+        #     if term or trunc:
+        #         new_obs[idx] = info['final_observation'][idx]
+
+        # convert to tensor
+        rewards = th.as_tensor(rewards, dtype=th.float32, device=self.device)
+
+        terminateds = th.as_tensor(
+            [1.0 if _ else 0.0 for _ in terminateds],
+            dtype=th.float32,
+            device=self.device,
+        )
+        truncateds = th.as_tensor(
+            [1.0 if _ else 0.0 for _ in truncateds],
+            dtype=th.float32,
+            device=self.device,
+        )
+
+        return self._format_obs(new_observations), rewards, terminateds, truncateds, infos
+
+
+if __name__ == '__main__':
+    #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1") #
+    plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1")

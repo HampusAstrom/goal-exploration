@@ -9,6 +9,9 @@ from gymnasium.spaces.utils import flatten, flatdim
 from gymnasium import spaces
 import utils
 
+from rllte.common.prototype import BaseReward
+import torch as th
+
 # TODO make class? for submitting multiple goal selection strategies with weights for each
 # to be used a fraction of the time in proportion to the weight
 # we can then also use this to input final goal when running evaluation
@@ -32,13 +35,14 @@ class GoalWrapper(
             reward_func = None, # TODO make type hint with Callable
             goal_selection_strategies = None, # TODO make type hint with Callable
             goal_sel_strat_weight = None,
-            # env: gym.Env[ObsType, ActType],
+            intrinsic_curiosity_module: BaseReward = None,
     ):
         gym.utils.RecordConstructorArgs.__init__(
             self,
             goal_weight=goal_weight,
         )
         gym.Wrapper.__init__(self, env)
+        self.icm = intrinsic_curiosity_module
 
         assert goal_weight >=0 and goal_weight <= 1
         self.goal_weight = goal_weight
@@ -79,6 +83,26 @@ class GoalWrapper(
         self.num_timesteps = 0
         self.currsteps_per_episode = []
 
+    def imc_calc_and_update(self, action, obs, last_obs, reward, terminated, truncated, info):
+        inputs = [action, obs, last_obs, reward, terminated, truncated]
+        action, obs, last_obs, reward, terminated, truncated = [th.from_numpy(x) for x in inputs]
+        self.icm.watch(observations=last_obs, # TODO this might now be used for ICM
+                       actions=action,
+                       rewards=reward,
+                       terminateds=terminated,
+                       truncateds=truncated,
+                       next_observations=obs)
+        samples = {'observations':last_obs.unsqueeze(0),
+                   'actions':action.unsqueeze(0),
+                   'rewards':reward.unsqueeze(0),
+                   'terminateds':terminated.unsqueeze(0),
+                   'truncateds':truncated.unsqueeze(0),
+                   'next_observations':obs.unsqueeze(0)}
+        intrinsic_reward = self.icm.compute(samples=samples,
+                                            sync=False) # should maybe be true?
+        self.icm.update(samples=samples)
+        return intrinsic_reward
+
     def step(
             self,
             action
@@ -91,16 +115,24 @@ class GoalWrapper(
         goal_reward = self.goal_reward(obs, self.goal, info)
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
+        # save old obs in info for ICM, then save new for next step
+        # watch the interactions and get necessary information for the intrinsic reward computation
+        #intrinsic_reward = self.imc_calc_and_update(action, obs, self.last_obs, reward, terminated, truncated, info)
+
+        # TODO This below is probably unececcary in most cases, lets be safe for now
+        info["last_obs"] = self.last_obs
+        self.last_obs = obs
         # output weighted average of rewards
-        totreward = gw*goal_reward + (1-gw)*reward
+        # TODO give intrinsic reward own weight for separate part of sum
+        totreward = gw*goal_reward + (1-gw)*(reward) # + intrinsic_reward
 
         # save separate rewards in info
         assert info.get("goal_reward") == None
         info["goal_reward"] = goal_reward
         assert info.get("extrinsic_reward") == None
         info["extrinsic_reward"] = reward
-
-        #self.seen_goals.append(obs)
+        #assert info.get("intrinsic_reward") == None
+        #info["intrinsic_reward"] = intrinsic_reward.detach().cpu().numpy()
 
         return self._get_obs(obs), totreward, terminated, truncated, info
 
@@ -113,6 +145,7 @@ class GoalWrapper(
         self.goal = self.select_goal(obs) # goal selection can require obs info
 
         self.targeted_goals.append(self.goal)
+        self.last_obs = obs
 
         return self._get_obs(obs), reset_info
 
@@ -134,6 +167,7 @@ class GoalWrapper(
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
         er = np.array([dct["extrinsic_reward"] for dct in info])
+        # TODO
         return gw*goal_reward + (1-gw)*er
 
     def set_goal_strategies(self, goal_selection_strategies, goal_sel_strat_weight=None):
@@ -343,6 +377,11 @@ class FiveXGoalSelection():
         goal_decay = 0.5**((cum_l[-1] - cum_l)/self.steps_halflife)
 
         # calc distance between each candidate and each previous goals
+        print(self.env.unwrapped.observation_space)
+        print(seen_goals.shape)
+        print(n_candidate_points.shape)
+        print(n_candidate_points[0])
+        exit()
         seen_dists = scipy.spatial.distance.cdist(seen_goals,n_candidate_points)
         targeted_dists = scipy.spatial.distance.cdist(targeted_goals,n_candidate_points)
         all_dists = np.concatenate((seen_dists, targeted_dists))

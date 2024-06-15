@@ -14,7 +14,9 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
-#import imageio
+from rllte.env.utils import Gymnasium2Torch
+#from utils import Gymnasium2Torch
+from rllte.xplore.reward import ICM
 
 import time
 import yappi
@@ -75,7 +77,7 @@ def train(base_path: str = "./data/wrapper/",
          ):
 
     base_path = os.path.join(base_path,env_id)
-    n_training_envs = 1
+    n_training_envs = 2
     n_eval_envs = 5
 
     # Create 4 artificial transitions per real transition
@@ -127,22 +129,29 @@ def train(base_path: str = "./data/wrapper/",
 
     # Initialize a training environment with default parameters
     #train_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0, vec_env_cls=SubprocVecEnv)
-    train_env = gym.make(env_id, **env_params) #, render_mode='human')
+    train_env = make_vec_env(env_id, n_envs=n_training_envs, vec_env_cls=SubprocVecEnv) # seed=0,
+    #train_env = gym.make(env_id, **env_params) #, render_mode='human')
+    #train_env = gym.make_vec(env_id, num_envs=n_training_envs, **env_params) #, render_mode='human')
     if train_seed is not None:
         train_env.reset(seed=train_seed)
 
     # wrap with goal conditioning and monitor wrappers
     if baseline_override in [None, "uniform-goal"]:
         # only use when training with goal
+        # We do ICM on base environment, the goals should not matter for transition predictions
+        #v_train_env = gym.vector.AsyncVectorEnv([train_env for _ in range(2)]) # TODO fix this shit
+        #v_train_env = DummyVecEnv([lambda: train_env])
+        #v_train_env = train_env
+        #t_train_env = Gymnasium2Torch(v_train_env, device) # TODO cuda, ?mps? or cpu here?
+        #icm = ICM(t_train_env,device)
         train_env_goal = GoalWrapper(train_env,
                                      goal_weight=goal_weight,
-                                     goal_range=goal_range)
-                                     #intrinsic_curiosity_module=ICM(train_env,
-                                     #                               device))
+                                     goal_range=goal_range,)
+                                     #intrinsic_curiosity_module=icm)
     else:
         train_env_goal = train_env # TODO handle that this name becomes missleading
-    train_env = Monitor(train_env_goal, log_dir)
-    #train_env = VecMonitor(train_env, log_dir)
+    #train_env = Monitor(train_env_goal, log_dir)
+    train_env = VecMonitor(train_env_goal, log_dir)
 
     if env_id == "SparsePendulumEnv-v1":
         fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
@@ -335,15 +344,30 @@ if __name__ == '__main__':
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
     goal_conf_to_permute = {"exploit_dist": [0.2,],
-                            "expand_dist": [0.01,],
-                            "component_weights": [[0.1, 1, 1, 0, 10],
-                                                  #[0.1, 1, 5, 0, 10],
+                            "expand_dist": [0.05, ],
+                            "component_weights": [[1, 0, 0, 0, 0],
+                                                #   [0, 1, 0, 0, 0],
+                                                #   [0, 0, 1, 0, 0],
+                                                #   [0, 0, 0, 0, 1],
+                                                #   [1, 0, 0, 0, 1],
+                                                #   [0, 1, 0, 0, 1],
+                                                #   [0, 0, 1, 0, 1],
+                                                #   [1, 0, 0, 0, 10],
+                                                #   [0, 1, 0, 0, 10],
+                                                #   [0, 0, 1, 0, 10],
+                                                #   [1, 1, 0, 0, 0],
+                                                #   [1, 0, 1, 0, 0],
+                                                #   [1, 1, 1, 0, 0],
+                                                #   [1, 1, 0, 0, 1],
+                                                #   [1, 0, 1, 0, 1],
+                                                #   [1, 1, 1, 0, 1],
+                                                #   [1, 1, 1, 0, 10],
                                                   ],
                             "steps_halflife": [500,],
                             "escalate_exploit": [True],
                             }
-    env_params = {#"harder_start": [0.1],
-                  "terminate": [True]
+    env_params = {"harder_start": [0.1],
+                  #"terminate": [True]
                   }
 
     params_to_permute = {"experiment": ["exp1", #"exp2", "exp3", "exp4", "exp5",
@@ -351,15 +375,15 @@ if __name__ == '__main__':
                                         #"exp11", "exp12", "exp13", "exp14", "exp15",
                                         #"exp16", "exp17", "exp18", "exp19", "exp20",
                                         ],
-                         "env_id": ["PathologicalMountainCar-v1.1",], # "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
+                         "env_id": ["SparsePendulumEnv-v1",], # "PathologicalMountainCar-v1.1", "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
-                         "steps": [500000],
+                         "steps": [20000],
                          "goal_weight": [1.0],
                          "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
-                         "baseline_override": [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
+                         "baseline_override": [None] # ["base-rl", "uniform-goal"] # should be if not doing baseline None
                          }
 
     experiment_list = named_permutations(params_to_permute)
