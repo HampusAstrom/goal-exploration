@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import Divider, Size
 import os
+from cycler import cycler
 
 # TODO possibly use jax again?
 def symlog(x):
@@ -12,6 +13,7 @@ def symexp(x):
 
 def plot_targeted_goals(goals, coord_names, path):
     assert len(coord_names) == len(goals[1,:])
+    order = np.linspace(0, 1, len(goals))
 
     fig = plt.figure(figsize=(2*len(coord_names), 2*len(coord_names)))
 
@@ -21,7 +23,7 @@ def plot_targeted_goals(goals, coord_names, path):
         if col < row:
             continue # don't plot diagonal
         ax = fig.add_subplot(len(coord_names)-1, len(coord_names)-1, i+1)
-        ax.plot(goals[:,col+1], goals[:,row], ".b")
+        im = ax.scatter(goals[:,col+1], goals[:,row], c=order)
         if row == 0:
             ax.set_xlabel(coord_names[col+1])
         else:
@@ -35,8 +37,12 @@ def plot_targeted_goals(goals, coord_names, path):
         ax.yaxis.tick_right()
         ax.yaxis.set_label_position('right')
 
-    plt.tight_layout()
+    cbar_ax = fig.add_axes([0, 0.15, 0.05, 0.7])
+    fig.colorbar(im, cax=cbar_ax)
+
+    #plt.tight_layout()
     plt.savefig(os.path.join(path,"goal_spread"))
+    plt.close(fig)
 
 def get_all_folders(dir):
     subfolders = [f.path for f in os.scandir(dir) if f.is_dir()]
@@ -66,18 +72,31 @@ def add_subplot(path, window, ax):
 def plot_all_in_folder(dir):
     subfolders = get_all_folders(dir)
 
+    # TODO replace with something that adaps to number of configurations
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'g', 'b', 'y', 'c', 'k']) *
+                           cycler('linestyle', ['-', ':',])))# '--', '-.'])))
+
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
-    window = 10
+    window = 1000
 
     for folder in subfolders:
         add_subplot(folder, window, ax)
 
-    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.legend(loc='upper left')#, bbox_to_anchor=(1, 0.5))
     ax.set_xlabel("steps")
     ax.set_ylabel("reward")
     #ax.set_ylim(-100, 200)
     fig.tight_layout()
     plt.savefig(os.path.join(dir, "eval_results"))
 
-plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1")
+    #coord_names = ["x", "y", "ang. vel."]
+    coord_names = ["xpos", "velocity"]
+    for folder in subfolders:
+        experiments = get_all_folders(folder)
+        for exp in experiments:
+            goal_file = os.path.join(exp, "goals")
+            if os.path.isfile(goal_file):
+                goals = np.loadtxt(goal_file, delimiter=' ')#, skiprows=2, usecols=0)
+                plot_targeted_goals(goals, coord_names,exp)
+
