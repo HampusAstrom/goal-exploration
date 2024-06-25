@@ -73,6 +73,7 @@ def train(base_path: str = "./data/wrapper/",
           env_params: dict = None,
           env_id = "PathologicalMountainCar-v1.1",
           baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
+          verbose = 0,
          ):
 
     base_path = os.path.join(base_path,env_id)
@@ -188,7 +189,8 @@ def train(base_path: str = "./data/wrapper/",
                                 eval_freq=max(500 // n_training_envs, 1),
                                 n_eval_episodes=5,
                                 deterministic=True,
-                                render=True)
+                                render=False,
+                                verbose=verbose)
 
     #check_env(train_env)
 
@@ -211,7 +213,7 @@ def train(base_path: str = "./data/wrapper/",
                 train_env,
                 **algo_kwargs,
                 learning_starts=300,
-                verbose=1,
+                verbose=verbose,
                 buffer_size=int(1e6),
                 learning_rate=1e-3,
                 gamma=0.95,
@@ -233,7 +235,8 @@ def train(base_path: str = "./data/wrapper/",
                                                 model.replay_buffer,
                                                 train_env_goal.targeted_goals,
                                                 train_steps=steps,
-                                                **goal_selection_params)
+                                                verbose = verbose > 0,
+                                                **goal_selection_params,)
         else:
             goal_selection = FiveXGoalSelection(train_env_goal,
                                                 model.replay_buffer,
@@ -332,7 +335,9 @@ def named_permutations(params_to_permute: dict):
 
 
 if __name__ == '__main__':
-    yappi.start()
+    profile = False
+    if profile:
+        yappi.start()
     #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
@@ -370,8 +375,11 @@ if __name__ == '__main__':
     for i, conf in enumerate(experiment_list):
         print("Training with configuration: " + str(conf))
         start_time = time.time()
+
         train(base_path = "./temp/wrapper/",
+              verbose = 0,
               **conf)
+
         time_used = time.time() - start_time
         total_time += time_used
         part_time = time.strftime('%H:%M:%S', time.gmtime(time_used))
@@ -382,8 +390,9 @@ if __name__ == '__main__':
         print(f"--- {i+1}/{len(experiment_list)} experiments have been " \
             + f"completed in {completed_time}/{total_time_estimate} (total time estimated) ---")
 
-    yappi.stop()
-    yappi.get_func_stats().save("./test3.pstats",type="pstat")
+    if profile:
+        yappi.stop()
+        yappi.get_func_stats().save("./test3.pstats",type="pstat")
 
     # for conf in product(fixed_goal_fractions, experiments):
     #     print("Training with configuration: " + str(conf))

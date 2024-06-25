@@ -211,6 +211,7 @@ class FiveXGoalSelection():
                  exploit_dist = 0.1,
                  steps_halflife = 1000,
                  escalate_exploit = False,
+                 verbose = False,
                  ) -> None:
         self.env = env
         self.replay_buffer = replay_buffer
@@ -224,6 +225,7 @@ class FiveXGoalSelection():
         self.exploit_dist = exploit_dist
         self.steps_halflife = steps_halflife
         self.escalate_exploit = escalate_exploit
+        self.verbose = verbose
 
     def norm_each_dim(self, array):
         # normalizes each sample in array to be on the range of 0-1 in each dimension
@@ -272,7 +274,6 @@ class FiveXGoalSelection():
     def inverse_distance_weighting(dists, rewards):
         with np.errstate(divide='ignore'):
             contrib_per_seen = rewards[:, None]/dists
-            print(contrib_per_seen)
             contrib = np.sum(contrib_per_seen, 0)/np.sum(dists, 0)
         # replace nan:s (from when exact point is seen) with that point
         to_replace = np.logical_or(np.isnan(contrib_per_seen),
@@ -408,11 +409,12 @@ class FiveXGoalSelection():
         else:
             return components_for_candidates
 
-        for part in components_for_candidates:
-            print(np.array2string(np.array(part), sign=' ', precision=3))
-        print(total_goal_val)
-        print(np.max(total_goal_val))
-        print()
+        if self.verbose:
+            for part in components_for_candidates:
+                print(np.array2string(np.array(part), sign=' ', precision=3))
+            print(total_goal_val)
+            print(np.max(total_goal_val))
+            print()
         # select cantidate with highest weight and return its goal
         ind = np.argmax(total_goal_val)
         best_cand = candidate_points[ind]
