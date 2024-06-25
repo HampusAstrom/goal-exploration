@@ -57,6 +57,15 @@ class DictReplayBufferSamples(NamedTuple):
     dones: th.Tensor
     rewards: th.Tensor
 
+class InfoDictReplayBufferSamples(NamedTuple):
+    observations: TensorDict
+    actions: th.Tensor
+    next_observations: TensorDict
+    dones: th.Tensor
+    rewards: th.Tensor
+    infos: np.ndarray
+    batch_indices: np.ndarray
+    env_indices: np.ndarray
 
 class RolloutReturn(NamedTuple):
     episode_timesteps: int

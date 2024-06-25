@@ -8,6 +8,7 @@ import json
 import utils
 
 from stable_baselines3 import SAC, HerReplayBuffer, DQN
+from stable_baselines3.dqn import DQNwithICM
 from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
@@ -151,7 +152,8 @@ def train(base_path: str = "./data/wrapper/",
     elif env_id == "PathologicalMountainCar-v1.1":
         fixed_goal = lambda obs: np.array([-1.6, 0.0,])
         coord_names = ["xpos", "velocity"]
-        algo = DQN
+        # algo = DQN
+        algo = DQNwithICM
 
     # Create log dir where evaluation results will be saved
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
@@ -197,7 +199,7 @@ def train(base_path: str = "./data/wrapper/",
                        "replay_buffer_kwargs": dict(
                        n_sampled_goal=n_sampled_goal,
                        goal_selection_strategy="future",
-                       copy_info_dict=True,),
+                       copy_info_dict=True,), # TODO Turn off if not needed
                        }
     else:
         policy = "MlpPolicy"

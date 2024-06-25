@@ -7,7 +7,7 @@ import torch as th
 from gymnasium import spaces
 
 from stable_baselines3.common.buffers import DictReplayBuffer
-from stable_baselines3.common.type_aliases import DictReplayBufferSamples
+from stable_baselines3.common.type_aliases import DictReplayBufferSamples, InfoDictReplayBufferSamples
 from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 from stable_baselines3.her.goal_selection_strategy import KEY_TO_GOAL_STRATEGY, GoalSelectionStrategy
 
@@ -166,6 +166,26 @@ class HerReplayBuffer(DictReplayBuffer):
             if done[env_idx]:
                 self._compute_episode_length(env_idx)
 
+    # could be used later if we skip passing non-copies of info up to the policy/algo
+    def replace(
+        self,
+        batch_indices,
+        env_indices,
+        #obs: Dict[str, np.ndarray] = None,
+        #next_obs: Dict[str, np.ndarray] = None,
+        #action: np.ndarray = None,
+        #reward: np.ndarray = None,
+        #done: np.ndarray = None,
+        infos: List[Dict[str, Any]] = None,
+    ) -> None:
+        # TODO make rest of values replaceable if wanted
+        #if obs is not None:
+        #    self.observations
+
+        if infos is not None:
+            self.infos[batch_indices, env_indices] = infos
+
+
     def _compute_episode_length(self, env_idx: int) -> None:
         """
         Compute and store the episode length for environment with index env_idx
@@ -226,23 +246,27 @@ class HerReplayBuffer(DictReplayBuffer):
 
         # Concatenate real and virtual data
         observations = {
-            key: th.cat((real_data.observations[key], virtual_data.observations[key]))
+            key: th.cat((virtual_data.observations[key], real_data.observations[key]))
             for key in virtual_data.observations.keys()
         }
-        actions = th.cat((real_data.actions, virtual_data.actions))
+        actions = th.cat((virtual_data.actions, real_data.actions))
         next_observations = {
-            key: th.cat((real_data.next_observations[key], virtual_data.next_observations[key]))
+            key: th.cat((virtual_data.next_observations[key], real_data.next_observations[key]))
             for key in virtual_data.next_observations.keys()
         }
-        dones = th.cat((real_data.dones, virtual_data.dones))
-        rewards = th.cat((real_data.rewards, virtual_data.rewards))
+        dones = th.cat((virtual_data.dones, real_data.dones))
+        rewards = th.cat((virtual_data.rewards, real_data.rewards))
+        infos = np.concatenate((virtual_data.infos, real_data.infos), axis=0)
 
-        return DictReplayBufferSamples(
+        return InfoDictReplayBufferSamples(
             observations=observations,
             actions=actions,
             next_observations=next_observations,
             dones=dones,
             rewards=rewards,
+            infos=infos,
+            batch_indices=batch_indices,
+            env_indices=env_indices,
         )
 
     def _get_real_samples(
@@ -250,7 +274,7 @@ class HerReplayBuffer(DictReplayBuffer):
         batch_indices: np.ndarray,
         env_indices: np.ndarray,
         env: Optional[VecNormalize] = None,
-    ) -> DictReplayBufferSamples:
+    ) -> InfoDictReplayBufferSamples:
         """
         Get the samples corresponding to the batch and environment indices.
 
@@ -265,14 +289,24 @@ class HerReplayBuffer(DictReplayBuffer):
         next_obs_ = self._normalize_obs(
             {key: obs[batch_indices, env_indices, :] for key, obs in self.next_observations.items()}, env
         )
+        if self.copy_info_dict:
+            # The copy may cause a slow down
+            #infos = copy.deepcopy(self.infos[batch_indices, env_indices])
+            # cheaper copy
+            #infos = self.infos[batch_indices, env_indices].copy()
+            # no copy, but less hassle to add new info from ICM, dangerous...
+            infos = self.infos[batch_indices, env_indices]
+        else:
+            infos = [{} for _ in range(len(batch_indices))]
 
         assert isinstance(obs_, dict)
         assert isinstance(next_obs_, dict)
         # Convert to torch tensor
         observations = {key: self.to_torch(obs) for key, obs in obs_.items()}
         next_observations = {key: self.to_torch(obs) for key, obs in next_obs_.items()}
+        # infos = {key: self.to_torch(info) for key, info in infos.items()}
 
-        return DictReplayBufferSamples(
+        return InfoDictReplayBufferSamples(
             observations=observations,
             actions=self.to_torch(self.actions[batch_indices, env_indices]),
             next_observations=next_observations,
@@ -282,6 +316,9 @@ class HerReplayBuffer(DictReplayBuffer):
                 self.dones[batch_indices, env_indices] * (1 - self.timeouts[batch_indices, env_indices])
             ).reshape(-1, 1),
             rewards=self.to_torch(self._normalize_reward(self.rewards[batch_indices, env_indices].reshape(-1, 1), env)),
+            infos=infos,
+            batch_indices=batch_indices,
+            env_indices=env_indices,
         )
 
     def _get_virtual_samples(
@@ -289,7 +326,7 @@ class HerReplayBuffer(DictReplayBuffer):
         batch_indices: np.ndarray,
         env_indices: np.ndarray,
         env: Optional[VecNormalize] = None,
-    ) -> DictReplayBufferSamples:
+    ) -> InfoDictReplayBufferSamples:
         """
         Get the samples, sample new desired goals and compute new rewards.
 
@@ -340,8 +377,9 @@ class HerReplayBuffer(DictReplayBuffer):
         # Convert to torch tensor
         observations = {key: self.to_torch(obs) for key, obs in obs.items()}
         next_observations = {key: self.to_torch(obs) for key, obs in next_obs.items()}
+        #infos = {key: self.to_torch(info) for key, info in infos.items()}
 
-        return DictReplayBufferSamples(
+        return InfoDictReplayBufferSamples(
             observations=observations,
             actions=self.to_torch(self.actions[batch_indices, env_indices]),
             next_observations=next_observations,
@@ -351,6 +389,9 @@ class HerReplayBuffer(DictReplayBuffer):
                 self.dones[batch_indices, env_indices] * (1 - self.timeouts[batch_indices, env_indices])
             ).reshape(-1, 1),
             rewards=self.to_torch(self._normalize_reward(rewards.reshape(-1, 1), env)),  # type: ignore[attr-defined]
+            infos=infos,
+            batch_indices=batch_indices,
+            env_indices=env_indices,
         )
 
     def _sample_goals(self, batch_indices: np.ndarray, env_indices: np.ndarray) -> np.ndarray:

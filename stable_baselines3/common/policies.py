@@ -11,6 +11,7 @@ import numpy as np
 import torch as th
 from gymnasium import spaces
 from torch import nn
+from torch.nn import functional as F
 
 from stable_baselines3.common.distributions import (
     BernoulliDistribution,
@@ -968,3 +969,109 @@ class ContinuousCritic(BaseModel):
         with th.no_grad():
             features = self.extract_features(obs, self.features_extractor)
         return self.q_networks[0](th.cat([features, actions], dim=1))
+
+class ICM(BaseModel):
+    """
+    Intrinsic curiosity model to add to algorithms.
+    This version is without cnn, for images and such spaces
+    a new version should be made
+
+    """
+
+    def __init__(self,
+                 # the three args below are in *args...
+                 *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # only use obs part if goal conditioned problem, transition function
+        # independent of goals
+        if isinstance(self.observation_space, spaces.Dict) and \
+            "observation" in self.observation_space:
+                self.obs_subspace = True
+                self.observation_space = self.observation_space["observation"]
+        else:
+            self.obs_subspace = False
+
+        self.features_extractor = self.make_features_extractor()
+        self.features_dim = self.features_extractor.features_dim
+
+        # OBS! if simple obs use default features_extractor_class
+        # if not, make sure to specify good mlp or cnn for task
+
+        # TODO here is the plan
+        # use generic feature extractor as encoder, flatten if passthrough
+        # version for simple environments
+        # connect 2x output from feature extractor (s_t, s_t+1) to inverse model
+        # connect feature extractor for s_t and actions to forward model
+        # write forward for full setup that returns losses that can
+        # be backpropped each, or something similar
+        # make sure to handle that forward should not backprop into feature extractor
+
+        # TODO replace hardcoded architectures
+
+        self.inverse_arch = [4] #[16, 16] #[64, 64]
+        action_dim = int(self.action_space.n)  # number of actions
+        inverse_model = create_mlp(self.features_dim*2, action_dim, self.inverse_arch)
+        self.inverse_model = nn.Sequential(*inverse_model)
+
+        self.forward_arch = [4] #[16, 16] #[64, 64]
+        forward_model = create_mlp(self.features_dim + action_dim, self.features_dim, self.inverse_arch)
+        self.forward_model = nn.Sequential(*forward_model)
+
+    def forward(self,
+                obs: th.Tensor,
+                obs_next: th.Tensor,
+                action: th.Tensor,) -> th.Tensor:
+        """
+        Determine intrinsic reward.
+
+        :param obs: Observation before action (excluding goals)
+        :param obs_next: Observation after action (excluding goals)
+        :param action: Action taken
+        :return: Embedding of next state
+                 forward models estimate of next state embedding
+                 inverse models estimate of next action
+        """
+        state_emb = self.extract_features(obs, self.features_extractor)
+        state_emb_next = self.extract_features(obs_next, self.features_extractor)
+        action_est = self.inverse_model(th.cat((state_emb, state_emb_next), dim=1))
+        # one hot encode action
+        action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
+        action = th.flatten(action, start_dim=1)
+        state_emb_next_est = self.forward_model(th.cat((state_emb.detach(), action), dim=1)) # TODO make sure this does not backprop through embedding/extractor
+        return state_emb_next, state_emb_next_est, action_est
+
+    def loss(self,
+             state_emb_next: th.Tensor,
+             state_emb_next_est: th.Tensor,
+             action_est: th.Tensor,
+             action: th.Tensor,):
+        ce = nn.CrossEntropyLoss()
+        forward_mse = nn.MSELoss(reduce=False)
+
+        # one hot encode action
+        action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
+        action = th.flatten(action, start_dim=1)
+
+        inverse_loss = ce(action, action_est)
+        forward_loss = forward_mse(state_emb_next.detach(), state_emb_next_est) # is this value r_i
+
+        ri = forward_loss.mean(dim=1)
+
+        forward_loss = ri.mean()
+
+        return ri, forward_loss, inverse_loss
+
+    def _get_constructor_parameters(self) -> Dict[str, Any]:
+        data = super()._get_constructor_parameters()
+
+        # TODO make sure this is right!
+
+        data.update(
+            dict(
+                features_dim=self.features_dim,
+                features_extractor=self.features_extractor,
+            )
+        )
+        return data

@@ -5,10 +5,11 @@ import numpy as np
 import torch as th
 from gymnasium import spaces
 from torch.nn import functional as F
+from itertools import chain
 
 from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
-from stable_baselines3.common.policies import BasePolicy
+from stable_baselines3.common.policies import BasePolicy, ICM
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import get_linear_fn, get_parameters_by_name, polyak_update
 from stable_baselines3.dqn.policies import CnnPolicy, DQNPolicy, MlpPolicy, MultiInputPolicy, QNetwork
@@ -280,3 +281,120 @@ class DQN(OffPolicyAlgorithm):
         state_dicts = ["policy", "policy.optimizer"]
 
         return state_dicts, []
+
+class DQNwithICM(DQN):
+    """
+    Variant of DQN with an ICM network built in.
+    For goal rewards the ICM does not see the goal.
+
+    """
+
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+        ) -> None:
+        super().__init__(*args,**kwargs)
+
+        # TODO add class for ICM
+        self.icm = ICM(self.env.observation_space["observation"],
+                       self.env.action_space).to(self.device)
+        #self.policy.optimizer.param_groups.append({'params': list(self.icm.parameters())})
+        # remake optimizer with my params too
+        self.policy.optimizer = self.policy.optimizer_class(
+            chain(self.policy.parameters(), self.icm.parameters()),
+            lr=kwargs["learning_rate"],
+            #**self.optimizer_kwargs, # TODO make sure these make it in if they exist?
+        )
+
+    def train(self, gradient_steps: int, batch_size: int = 100) -> None:
+        # Switch to train mode (this affects batch norm / dropout)
+        self.policy.set_training_mode(True)
+        # Update learning rate according to schedule
+        self._update_learning_rate(self.policy.optimizer)
+
+        losses = []
+        for _ in range(gradient_steps):
+            # Sample replay buffer
+            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)  # type: ignore[union-attr]
+
+            # TODO new plan, instead of changing most stuff in HER replay, just
+            # convert to np and unnormalize here
+
+
+            # TODO give unnormalized data to ICM to do:
+            # forward
+            # replace rewards
+            # normalize everything
+            # do loss.backwards() on a_hat and r_i as well
+            # and clip and optimizer step()
+            vec_env = self.get_vec_normalize_env()
+            if vec_env is not None:
+                obs = vec_env.unnormalize_obs(replay_data.observations)
+                obs_next = vec_env.unnormalize_obs(replay_data.next_observations)
+            else:
+                obs = replay_data.observations
+                obs_next = replay_data.next_observations
+
+            # print(obs["observation"])
+            # print(obs_next["observation"])
+            # print(replay_data.actions)
+
+            state_emb_next, state_emb_next_est, action_est = self.icm.forward(
+                    obs["observation"],
+                    obs_next["observation"],
+                    replay_data.actions,
+            )
+            #vec_env.unnormalize_reward(replay_data.rewards),
+
+            # forward loss is intrinsic reward
+            ri, forward_loss, inverse_loss = self.icm.loss(state_emb_next,
+                                                       state_emb_next_est,
+                                                       action_est,
+                                                       replay_data.actions)
+
+            # TODO calc new total reward if not just goal, ignore for now
+
+            # save new info about intrinsic reward back dowm to the replay buffer...
+            ri = ri.detach().cpu().numpy()
+            for i, entry in enumerate(replay_data.infos):
+                # TODO for now we overwrite intrinsic reward, we could keep list of all
+
+                replay_data.infos[i]["intrinsic_reward"] = ri[i]
+
+            # TODO append losses for backwards etc
+            losses.append(forward_loss.item())
+            losses.append(inverse_loss.item())
+
+            with th.no_grad():
+                # Compute the next Q-values using the target network
+                next_q_values = self.q_net_target(replay_data.next_observations)
+                # Follow greedy policy: use the one with the highest value
+                next_q_values, _ = next_q_values.max(dim=1)
+                # Avoid potential broadcast issue
+                next_q_values = next_q_values.reshape(-1, 1)
+                # 1-step TD target
+                target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
+
+            # Get current Q-values estimates
+            current_q_values = self.q_net(replay_data.observations)
+
+            # Retrieve the q-values for the actions from the replay buffer
+            current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
+
+            # Compute Huber loss (less sensitive to outliers)
+            loss = F.smooth_l1_loss(current_q_values, target_q_values)
+            losses.append(loss.item())
+
+            # Optimize the policy
+            self.policy.optimizer.zero_grad()
+            loss.backward()
+            # Clip gradient norm
+            th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.policy.optimizer.step()
+
+        # Increase update counter
+        self._n_updates += gradient_steps
+
+        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+        self.logger.record("train/loss", np.mean(losses))

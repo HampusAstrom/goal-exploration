@@ -99,4 +99,3 @@ def plot_all_in_folder(dir):
             if os.path.isfile(goal_file):
                 goals = np.loadtxt(goal_file, delimiter=' ')#, skiprows=2, usecols=0)
                 plot_targeted_goals(goals, coord_names,exp)
-
