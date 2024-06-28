@@ -7,9 +7,16 @@ from cycler import cycler
 # TODO possibly use jax again?
 def symlog(x):
     return np.sign(x) * np.log(1 + np.abs(x))
+    # TODO use np.log1p
 
 def symexp(x):
     return np.sign(x) * (np.exp(np.abs(x)) - 1)
+
+def norm_vec(x):
+    std = np.std(x)
+    if std == 0:
+        std = 1
+    return (x-np.mean(x))/std
 
 def plot_targeted_goals(goals, coord_names, path):
     assert len(coord_names) == len(goals[1,:])
@@ -99,3 +106,7 @@ def plot_all_in_folder(dir):
             if os.path.isfile(goal_file):
                 goals = np.loadtxt(goal_file, delimiter=' ')#, skiprows=2, usecols=0)
                 plot_targeted_goals(goals, coord_names,exp)
+
+if __name__ == '__main__':
+    #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1") #
+    plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1")

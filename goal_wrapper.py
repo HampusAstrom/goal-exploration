@@ -212,6 +212,7 @@ class FiveXGoalSelection():
                  steps_halflife = 1000,
                  escalate_exploit = False,
                  verbose = False,
+                 norm_comps = False,
                  ) -> None:
         self.env = env
         self.replay_buffer = replay_buffer
@@ -226,6 +227,7 @@ class FiveXGoalSelection():
         self.steps_halflife = steps_halflife
         self.escalate_exploit = escalate_exploit
         self.verbose = verbose
+        self.norm_comps = norm_comps
 
     def norm_each_dim(self, array):
         # normalizes each sample in array to be on the range of 0-1 in each dimension
@@ -357,7 +359,7 @@ class FiveXGoalSelection():
 
         # get expand (goldilocks) component
         min_dist_to_seen = np.min(seen_dists, 0)
-        goldilocks = self.goldilocks(min_dist_to_seen, self.expand_dist)
+        expand_contrib = self.goldilocks(min_dist_to_seen, self.expand_dist)
 
         # get exclude component
         # TODO this might be the slowest part, maybe save between steps
@@ -365,7 +367,7 @@ class FiveXGoalSelection():
         exclusion_sizes = np.min(targeted2seen_dists, 0)
         exclusion_per_target = - np.maximum(1-targeted_dists/exclusion_sizes[:, None], 0)
         exclusion_decayed = exclusion_per_target*goal_decay[:, None]
-        exclusion_contrib = np.sum(exclusion_decayed, 0)
+        exclude_contrib = np.sum(exclusion_decayed, 0)
         #exclusion_contrib = np.sum(exclusion_per_target, 0)
 
         # get explain component
@@ -391,9 +393,18 @@ class FiveXGoalSelection():
         else:
             exploit_weight = self.component_weights[4]
 
-        components_for_candidates = np.array([self.component_weights[0] * min_dist_to_any,
-                                     self.component_weights[1] * goldilocks,
-                                     self.component_weights[2] * exclusion_contrib,
+        experiment_contrib = min_dist_to_any
+        # if we want to normalize each
+        if self.norm_comps:
+            experiment_contrib = utils.norm_vec(experiment_contrib)
+            expand_contrib = utils.norm_vec(expand_contrib)
+            exclude_contrib = utils.norm_vec(exclude_contrib)
+            explain_contrib = utils.norm_vec(explain_contrib)
+            exploit_contrib = utils.norm_vec(exploit_contrib)
+
+        components_for_candidates = np.array([self.component_weights[0] * experiment_contrib,
+                                     self.component_weights[1] * expand_contrib,
+                                     self.component_weights[2] * exclude_contrib,
                                      self.component_weights[3] * explain_contrib,
                                      exploit_weight * exploit_contrib,])
 

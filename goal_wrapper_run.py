@@ -95,6 +95,8 @@ def train(base_path: str = "./data/wrapper/",
         for key, val in goal_selection_params.items():
             if type(val) is list:
                 options += "_[" + ",".join(str(v) for v in val) + "]" + key
+            elif val == True:
+                options += "_" + key
             else:
                 options += "_" + str(val) + key
     elif baseline_override == "uniform-goal":
@@ -348,6 +350,7 @@ if __name__ == '__main__':
                                                   ],
                             "steps_halflife": [500,],
                             "escalate_exploit": [True],
+                            "norm_comps": [True],
                             }
     env_params = {#"harder_start": [0.1],
                   "terminate": [True]
