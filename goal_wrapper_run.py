@@ -157,6 +157,8 @@ def train(base_path: str = "./data/wrapper/",
         coord_names = ["xpos", "velocity"]
         # algo = DQN
         algo = DQNwithICM
+        if baseline_override in ["base-rl", "curious"]:
+            algo = DQN
 
     # Create log dir where evaluation results will be saved
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
