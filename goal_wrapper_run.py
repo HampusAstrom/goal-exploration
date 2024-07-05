@@ -349,11 +349,25 @@ if __name__ == '__main__':
     #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
     #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
     #device = ["cpu", "cuda"]
+    weights = [1, 1, 1, 1, 1]
+    temp = utils.weight_combinations(weights, 1)
+    temp.append([1, 1, 1, 1, 1])
+
     goal_conf_to_permute = {"exploit_dist": [0.2,],
                             "expand_dist": [0.01,],
-                            "component_weights": [[0.1, 1, 1, 0, 10],
-                                                  #[0.1, 1, 5, 0, 10],
-                                                  ],
+                            "component_weights": [#[1, 1, 0, 0, 0], # try? [1, 0, 0, 5, 0], or so
+                                                #   [1, 0, 1, 0, 0],
+                                                #   [1, 0, 0, 1, 0],
+                                                #   [1, 0, 0, 0, 1],
+                                                #   [0, 1, 1, 0, 0],
+                                                  [0, 1, 0, 1, 0],
+                                                #   [0, 1, 0, 0, 1],
+                                                #   [0, 0, 1, 1, 0],
+                                                #   [0, 0, 1, 0, 1],
+                                                #   [0, 0, 0, 1, 1],
+                                                 ],
+                            # "component_weights": utils.weight_combinations(weights, 2),
+                            # "component_weights": temp,
                             "steps_halflife": [500,],
                             "escalate_exploit": [True],
                             "norm_comps": [True],

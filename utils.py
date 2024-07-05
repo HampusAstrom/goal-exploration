@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import Divider, Size
 import os
 from cycler import cycler
+from itertools import combinations
 
 # TODO possibly use jax again?
 def symlog(x):
@@ -17,6 +18,27 @@ def norm_vec(x):
     if std == 0:
         std = 1
     return (x-np.mean(x))/std
+
+# num is number of elements to fill, should be between 1 and len(weights)
+def weight_combinations(weights, num):
+    weights = np.array(weights)
+    indices = list(range(len(weights)))
+    combs = combinations(indices, num)
+    configurations = []
+    for comb in combs:
+        comb = np.array(comb)
+        conf = np.zeros(weights.shape)
+        conf[comb] = weights[comb]
+        # for readability of returned list
+        lst = []
+        is_int = np.mod(conf, 1) == 0
+        for i in range(is_int.size):
+            if is_int[i]:
+                lst.append(int(conf[i]))
+            else:
+                lst.append(float(conf[i]))
+        configurations.append(lst)
+    return configurations
 
 def plot_targeted_goals(goals, coord_names, path):
     assert len(coord_names) == len(goals[1,:])

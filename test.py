@@ -118,7 +118,7 @@ def test_func(a = 0, b = 0, c = 0):
 
 params_to_permute = {"a": [0, 1, 2], "b": [3, 4, 5]}
 
-from itertools import product
+from itertools import product, combinations
 for combs in product (*params_to_permute.values()):
     dct = {ele: cnt for ele, cnt in zip(params_to_permute, combs)}
     print(dct)
@@ -140,3 +140,19 @@ max_s = x[np.argmax(s[:50])]
 max_a = x[np.argmax(a[:50])]
 print(max_s)
 print(max_a)
+
+indices = np.array([0, 1, 2, 3, 4,])
+weights = np.array([1, 2, 3, 4, 5,])
+
+combs = combinations(indices, 2)
+
+#print(list(combs))
+for comb in combs:
+    comb = np.array(comb)
+    conf = np.zeros(weights.shape)
+    conf[comb] = weights[comb]
+    print(conf)
+
+combs = utils.weight_combinations(weights, 1)
+
+print(combs)
