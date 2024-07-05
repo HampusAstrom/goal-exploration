@@ -75,6 +75,7 @@ def train(base_path: str = "./data/wrapper/",
           buffer_size = int(1e6),
           baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
           verbose = 0,
+          test_needed_experiments = False,
          ):
 
     base_path = os.path.join(base_path,env_id)
@@ -123,6 +124,10 @@ def train(base_path: str = "./data/wrapper/",
             exp_paths_completed.append(exp)
 
     exps = [os.path.basename(exp_path) for exp_path in exp_paths_completed]
+
+    # if test_needed_experiments we are just verifying number of needed experiments
+    if test_needed_experiments:
+        return exps
 
     # abort if we have enough experiments
     if experiments <= len(exps):
@@ -416,14 +421,32 @@ if __name__ == '__main__':
                          "baseline_override": [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
                          }
 
+    base_path = "./temp/wrapper/"
+
     experiment_list = named_permutations(params_to_permute)
-    print(f"{len(experiment_list)} experiments queued up to be run")
+
+    # run test runs first to confirm needed number of experiments
+    full_experiment_list = []
+    total_planned = 0
+    total_found = 0
+    for conf in experiment_list:
+        completed_exps = train(base_path = base_path,
+                               verbose = 0,
+                               test_needed_experiments = True,
+                               **conf)
+        total_planned += conf["experiments"]
+        total_found += min(len(completed_exps), conf["experiments"])
+        if len(completed_exps) < conf["experiments"]:
+            full_experiment_list += [conf]*(conf["experiments"]-len(completed_exps))
+
+    print(f"Out of {total_planned} planned experiments, {total_found} were already completed")
+    print(f"{len(full_experiment_list)} experiments queued up to be run")
     total_time = 0 # in seconds
-    for i, conf in enumerate(experiment_list):
+    for i, conf in enumerate(full_experiment_list):
         print("Training with configuration: " + str(conf))
         start_time = time.time()
 
-        train(base_path = "./temp/wrapper/",
+        train(base_path = base_path,
               verbose = 0,
               **conf)
 
@@ -431,10 +454,10 @@ if __name__ == '__main__':
         total_time += time_used
         part_time = time.strftime('%H:%M:%S', time.gmtime(time_used))
         print(f"--- latest experiment took {part_time} ---")
-        total_estimate = total_time/(i+1) * len(experiment_list)
+        total_estimate = total_time/(i+1) * len(full_experiment_list)
         completed_time = time.strftime('%H:%M:%S', time.gmtime(total_time))
         total_time_estimate = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
-        print(f"--- {i+1}/{len(experiment_list)} experiments have been " \
+        print(f"--- {i+1}/{len(full_experiment_list)} experiments have been " \
             + f"completed in {completed_time}/{total_time_estimate} (total time estimated) ---")
 
     if profile:
