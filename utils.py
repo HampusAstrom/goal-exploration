@@ -125,7 +125,7 @@ def add_subplot(path, window, ax):
     avg_std = np.convolve(std, [1]*window, 'valid')/window
     #x = range(len(avg_data))
     x = np.linspace(0, len(avg_data)*100, len(avg_data))
-    ax.plot(x, avg_data, label=os.path.basename(path))
+    ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03,)
 
 def plot_all_in_folder(dir, num2keep, keywords=["baseline"]):
@@ -172,8 +172,8 @@ def plot_all_in_folder(dir, num2keep, keywords=["baseline"]):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--top')
-    parser.add_argument('-k', '--keep', nargs='*')
+    parser.add_argument('-t', '--top', default=0)
+    parser.add_argument('-k', '--keep', nargs='*', default=[])
     args = parser.parse_args()
 
     #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1") #
