@@ -61,7 +61,7 @@ class MapGoalComponentsCallback(BaseCallback):
 
 def train(base_path: str = "./data/wrapper/",
           steps: int = 10000,
-          experiment: str = "exp1",
+          experiments: int = 1,
           goal_weight: float = 0.5,
           goal_range: float = -1,
           eval_seed: int = None,
@@ -111,6 +111,30 @@ def train(base_path: str = "./data/wrapper/",
 
     if buffer_size != int(1e6): # if not default
         options += "_" + str(buffer_size) + "buffer_size"
+
+    # check existing experiments
+    exp_paths = utils.get_all_folders(os.path.join(base_path, options))
+
+    # remove unfinished experiments from list so they can be re-run
+    # TODO find a less hacky solution
+    exp_paths_completed = []
+    for exp in exp_paths:
+        if os.path.isfile(os.path.join(exp, "completed.txt")):
+            exp_paths_completed.append(exp)
+
+    exps = [os.path.basename(exp_path) for exp_path in exp_paths_completed]
+
+    # abort if we have enough experiments
+    if experiments <= len(exps):
+        return
+
+    # find and set next experiment name
+    exp_ind = 1
+    while True:
+        experiment = "exp" + str(exp_ind)
+        if experiment not in exps:
+            break
+        exp_ind += 1
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -290,6 +314,9 @@ def train(base_path: str = "./data/wrapper/",
                                 os.path.join(base_path, options, experiment))
         np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
 
+    # mark experiment complete
+    with open(os.path.join(base_path, options, experiment, "completed.txt"), 'w') as fp:
+        pass
 
 #model.load(model_path, eval_env)
 
@@ -376,11 +403,7 @@ if __name__ == '__main__':
                   "terminate": [True]
                   }
 
-    params_to_permute = {"experiment": ["exp1", #"exp2", "exp3", "exp4", "exp5",
-                                        #"exp6", "exp7", "exp8", "exp9", "exp10",
-                                        #"exp11", "exp12", "exp13", "exp14", "exp15",
-                                        #"exp16", "exp17", "exp18", "exp19", "exp20",
-                                        ],
+    params_to_permute = {"experiments": [1],
                          "env_id": ["PathologicalMountainCar-v1.1",], # "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],

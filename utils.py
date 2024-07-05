@@ -75,10 +75,9 @@ def plot_targeted_goals(goals, coord_names, path):
     plt.close(fig)
 
 def get_all_folders(dir):
+    if not os.path.exists(dir):
+        return []
     subfolders = [f.path for f in os.scandir(dir) if f.is_dir()]
-
-    # for obj in subfolders:
-    #     print(obj)
     return sorted(subfolders)
 
 def get_names_with(strarray, substrngs):
