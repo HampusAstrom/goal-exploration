@@ -153,7 +153,7 @@ def train(base_path: str = "./data/wrapper/",
         coord_names = ["x", "y", "ang. vel."]
         algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
-        fixed_goal = lambda obs: np.array([-1.6, 0.0,])
+        fixed_goal = lambda obs: np.array([-1.65, -0.02,])
         coord_names = ["xpos", "velocity"]
         # algo = DQN
         algo = DQNwithICM
