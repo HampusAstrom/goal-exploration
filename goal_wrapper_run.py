@@ -72,6 +72,7 @@ def train(base_path: str = "./data/wrapper/",
           goal_selection_params: dict = None,
           env_params: dict = None,
           env_id = "PathologicalMountainCar-v1.1",
+          buffer_size = int(1e6),
           baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
           verbose = 0,
          ):
@@ -107,6 +108,9 @@ def train(base_path: str = "./data/wrapper/",
     else:
         options = str(steps) + "steps_" \
                 + baseline_override + "-baseline"
+
+    if buffer_size != int(1e6): # if not default
+        options += "_" + str(buffer_size) + "buffer_size"
 
     # Create log dir
     log_dir = os.path.join(base_path, options, experiment, "train_logs")
@@ -218,7 +222,7 @@ def train(base_path: str = "./data/wrapper/",
                 **algo_kwargs,
                 learning_starts=300,
                 verbose=verbose,
-                buffer_size=int(1e6),
+                buffer_size=buffer_size,
                 learning_rate=1e-3,
                 gamma=0.95,
                 batch_size=256,
@@ -371,6 +375,7 @@ if __name__ == '__main__':
                          "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
+                         "buffer_size": [20000],
                          "baseline_override": [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
                          }
 
