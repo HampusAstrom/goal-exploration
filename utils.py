@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import Divider, Size
 import os
+import argparse
 from cycler import cycler
 from itertools import combinations
 
@@ -80,6 +81,36 @@ def get_all_folders(dir):
     #     print(obj)
     return sorted(subfolders)
 
+def get_names_with(strarray, substrngs):
+    ret = []
+    for str in strarray:
+        if any(s in str for s in substrngs):
+            ret.append(str)
+    return ret
+
+def get_best_x_and_keywords(path, num2keep, keywords=[], frac_to_eval=0.2):
+    folders = get_all_folders(path)
+    base = get_names_with(folders, keywords)
+
+    if num2keep <= 0:
+        num2keep = len(folders)
+
+    means = []
+    for folder in folders:
+        datas = []
+        experiments = get_all_folders(folder)
+        for exp in experiments:
+            datas = []
+            data = np.loadtxt(os.path.join(exp, "eval_logs", "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+            cut = int(frac_to_eval*len(data))
+            datas.append(data[-cut:])
+        mean = np.mean(datas)
+        means.append(mean)
+    ind = np.argsort(means)[-num2keep:]
+    print(ind)
+
+    return np.unique(np.concatenate((np.array(folders)[ind],np.array(base))))
+
 def add_subplot(path, window, ax):
     datas = []
     experiments = get_all_folders(path)
@@ -98,18 +129,23 @@ def add_subplot(path, window, ax):
     ax.plot(x, avg_data, label=os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03,)
 
-def plot_all_in_folder(dir):
-    subfolders = get_all_folders(dir)
+def plot_all_in_folder(dir, num2keep, keywords=["baseline"]):
+    folders = get_all_folders(dir)
 
     # TODO replace with something that adaps to number of configurations
-    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'g', 'b', 'y', 'c', 'k']) *
-                           cycler('linestyle', ['-', ':',])))# '--', '-.'])))
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'g', 'b', 'k', 'c', 'y', 'm']) *
+                           cycler('linestyle', ['-', ':', '--', '-.',]))) # '-.', (5, (10, 3))
 
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
     window = 1000
 
-    for folder in subfolders:
+    # override to only plot x best + baselines
+    folders = get_best_x_and_keywords(dir, num2keep, keywords=keywords)
+
+    folders = sorted(folders)
+
+    for folder in folders:
         add_subplot(folder, window, ax)
 
     ax.legend(loc='upper left')#, bbox_to_anchor=(1, 0.5))
@@ -117,11 +153,17 @@ def plot_all_in_folder(dir):
     ax.set_ylabel("reward")
     #ax.set_ylim(-100, 200)
     fig.tight_layout()
-    plt.savefig(os.path.join(dir, "eval_results"))
+    name = ""
+    if num2keep > 0:
+        name += f"top{num2keep}_"
+    name += "eval_results"
+    if num2keep > 0 and keywords != []:
+        name += f"_including_{keywords}"
+    plt.savefig(os.path.join(dir, name))
 
     #coord_names = ["x", "y", "ang. vel."]
     coord_names = ["xpos", "velocity"]
-    for folder in subfolders:
+    for folder in folders:
         experiments = get_all_folders(folder)
         for exp in experiments:
             goal_file = os.path.join(exp, "goals")
@@ -130,5 +172,12 @@ def plot_all_in_folder(dir):
                 plot_targeted_goals(goals, coord_names,exp)
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-t', '--top')
+    parser.add_argument('-k', '--keep', nargs='*')
+    args = parser.parse_args()
+
     #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1") #
-    plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1")
+    plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1",
+                       int(args.top),
+                       keywords=args.keep)
