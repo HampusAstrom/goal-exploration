@@ -373,6 +373,17 @@ def named_permutations(params_to_permute: dict):
         list.append(conf)
     return list
 
+def confirm():
+    """
+    Ask user to enter Y or N (case-insensitive).
+
+    :return: True if the answer is Y.
+    :rtype: bool
+    """
+    answer = ""
+    while answer not in ["y", "n"]:
+        answer = input("Execute these experiments [Y/N]? ").lower()
+    return answer == "y"
 
 if __name__ == '__main__':
     profile = False
@@ -441,6 +452,8 @@ if __name__ == '__main__':
 
     print(f"Out of {total_planned} planned experiments, {total_found} were already completed")
     print(f"{len(full_experiment_list)} experiments queued up to be run")
+    if not confirm():
+        exit()
     total_time = 0 # in seconds
     for i, conf in enumerate(full_experiment_list):
         print("Training with configuration: " + str(conf))
