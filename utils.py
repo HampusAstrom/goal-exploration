@@ -87,10 +87,7 @@ def get_names_with(strarray, substrngs):
             ret.append(str)
     return ret
 
-def get_best_x_and_keywords(path, num2keep, keywords=[], frac_to_eval=0.2):
-    folders = get_all_folders(path)
-    base = get_names_with(folders, keywords)
-
+def get_best_x(folders, num2keep, frac_to_eval=0.2):
     if num2keep <= 0:
         num2keep = len(folders)
 
@@ -108,7 +105,7 @@ def get_best_x_and_keywords(path, num2keep, keywords=[], frac_to_eval=0.2):
     ind = np.argsort(means)[-num2keep:]
     print(ind)
 
-    return np.unique(np.concatenate((np.array(folders)[ind],np.array(base))))
+    return np.array(folders)[ind]
 
 def add_subplot(path, window, ax):
     datas = []
@@ -116,7 +113,8 @@ def add_subplot(path, window, ax):
     for exp in experiments:
         data = np.loadtxt(os.path.join(exp, "eval_logs", "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
         #avg_data = np.convolve(data, [1]*window, 'valid')/window
-        datas.append(data)
+        if os.path.isfile(os.path.join(exp, "completed.txt")):
+            datas.append(data)
     #avg_data = np.mean(datas, axis=0)
     #avg_std = np.std(datas, axis=0)
     data = np.mean(datas, axis=0)
@@ -128,8 +126,7 @@ def add_subplot(path, window, ax):
     ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03,)
 
-def plot_all_in_folder(dir, num2keep, keywords=["baseline"]):
-    folders = get_all_folders(dir)
+def plot_all_in_folder(dir, num2keep, keywords=[], filter=None):
 
     # TODO replace with something that adaps to number of configurations
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'g', 'b', 'k', 'c', 'y', 'm']) *
@@ -139,15 +136,28 @@ def plot_all_in_folder(dir, num2keep, keywords=["baseline"]):
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
     window = 1000
 
-    # override to only plot x best + baselines
-    folders = get_best_x_and_keywords(dir, num2keep, keywords=keywords)
+    # get all experiments
+    folders = get_all_folders(dir)
+
+    # separate keywords to always keep
+    base = get_names_with(folders, keywords)
+
+    # filter rest of selection
+    if filter is not None:
+        folders = get_names_with(folders, filter)
+
+    # select best of filtered selection
+    folders = get_best_x(folders, num2keep)
+
+    # merge all that are to be plotted
+    folders = np.unique(np.concatenate((folders,np.array(base))))
 
     folders = sorted(folders)
 
     for folder in folders:
         add_subplot(folder, window, ax)
 
-    ax.legend(loc='upper left')#, bbox_to_anchor=(1, 0.5))
+    ax.legend(loc='upper left', prop={'size': 9})#, bbox_to_anchor=(1, 0.5))
     ax.set_xlabel("steps")
     ax.set_ylabel("reward")
     #ax.set_ylim(-100, 200)
@@ -174,9 +184,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--top', default=0)
     parser.add_argument('-k', '--keep', nargs='*', default=[])
+    parser.add_argument('-f', '--filter', nargs='*', default=[])
     args = parser.parse_args()
 
     #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1") #
     plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1",
                        int(args.top),
-                       keywords=args.keep)
+                       keywords=args.keep,
+                       filter=args.filter,
+                       )
