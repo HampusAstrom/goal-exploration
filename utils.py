@@ -126,7 +126,7 @@ def add_subplot(path, window, ax):
     ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.03,)
 
-def plot_all_in_folder(dir, num2keep, keywords=[], filter=None):
+def plot_all_in_folder(dir, coord_names, num2keep=-1, keywords=[], filter=None):
 
     # TODO replace with something that adaps to number of configurations
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'g', 'b', 'k', 'c', 'y', 'm']) *
@@ -170,8 +170,6 @@ def plot_all_in_folder(dir, num2keep, keywords=[], filter=None):
         name += f"_including_{keywords}"
     plt.savefig(os.path.join(dir, name))
 
-    #coord_names = ["x", "y", "ang. vel."]
-    coord_names = ["xpos", "velocity"]
     for folder in folders:
         experiments = get_all_folders(folder)
         for exp in experiments:
@@ -187,9 +185,9 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--filter', nargs='*', default=[])
     args = parser.parse_args()
 
-    #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1") #
-    plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1",
-                       int(args.top),
+    plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1", coord_names = ["x", "y", "ang. vel."],
+    #plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1", coord_names = ["xpos", "velocity"],
+                       num2keep=int(args.top),
                        keywords=args.keep,
                        filter=args.filter,
                        )
