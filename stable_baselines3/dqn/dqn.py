@@ -296,24 +296,25 @@ class DQNwithICM(DQN):
         ) -> None:
         super().__init__(*args,**kwargs)
 
-        # TODO add class for ICM
-        self.icm = ICM(self.env.observation_space["observation"],
-                       self.env.action_space).to(self.device)
-        #self.policy.optimizer.param_groups.append({'params': list(self.icm.parameters())})
+        self.icm = ICM(self.lr_schedule,
+                       self.env.observation_space["observation"],
+                       self.env.action_space,).to(self.device)
         # remake optimizer with my params too
-        self.policy.optimizer = self.policy.optimizer_class(
-            chain(self.policy.parameters(), self.icm.parameters()),
-            lr=kwargs["learning_rate"],
-            #**self.optimizer_kwargs, # TODO make sure these make it in if they exist?
-        )
+        # TODO use sepatate optimizer for icm parameters?
+        # self.policy.optimizer = self.policy.optimizer_class(
+        #     chain(self.policy.parameters(), self.icm.parameters()),
+        #     lr=kwargs["learning_rate"],
+        #     #**self.optimizer_kwargs, # TODO make sure these make it in if they exist?
+        # )
 
     def train(self, gradient_steps: int, batch_size: int = 100) -> None:
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)
         # Update learning rate according to schedule
-        self._update_learning_rate(self.policy.optimizer)
+        optimizers = [self.policy.optimizer, self.icm.inv_optimizer, self.icm.forw_optimizer]
+        self._update_learning_rate(optimizers)
 
-        losses = []
+        losses, icm_fw_losses, icm_iv_losses = [], [], []
         for _ in range(gradient_steps):
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)  # type: ignore[union-attr]
@@ -363,8 +364,8 @@ class DQNwithICM(DQN):
                 replay_data.infos[i]["intrinsic_reward"] = ri[i]
 
             # TODO append losses for backwards etc
-            losses.append(forward_loss.item())
-            losses.append(inverse_loss.item())
+            icm_fw_losses.append(forward_loss.item())
+            icm_iv_losses.append(inverse_loss.item())
 
             with th.no_grad():
                 # Compute the next Q-values using the target network
@@ -386,6 +387,8 @@ class DQNwithICM(DQN):
             loss = F.smooth_l1_loss(current_q_values, target_q_values)
             losses.append(loss.item())
 
+            # print(f"loss {loss}")
+
             # Optimize the policy
             self.policy.optimizer.zero_grad()
             loss.backward()
@@ -393,8 +396,23 @@ class DQNwithICM(DQN):
             th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.policy.optimizer.step()
 
+            # Optimize icm
+            self.icm.inv_optimizer.zero_grad()
+            self.icm.forw_optimizer.zero_grad()
+            inverse_loss.backward()
+            forward_loss.backward()
+            # Clip gradient norm
+            th.nn.utils.clip_grad_norm_(self.icm.parameters(), self.max_grad_norm)
+            self.icm.inv_optimizer.step()
+            self.icm.forw_optimizer.step()
+
         # Increase update counter
         self._n_updates += gradient_steps
 
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self.logger.record("train/loss", np.mean(losses))
+        self.logger.record("train/icm_forward_loss", np.mean(icm_fw_losses))
+        self.logger.record("train/icm_inverse_loss", np.mean(icm_iv_losses))
+
+    # TODO
+    # _get_torch_save_params

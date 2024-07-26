@@ -980,6 +980,7 @@ class ICM(BaseModel):
 
     def __init__(self,
                  # the three args below are in *args...
+                 lr_schedule: Schedule,
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
@@ -1010,14 +1011,19 @@ class ICM(BaseModel):
 
         # TODO replace hardcoded architectures
 
-        self.inverse_arch = [4] #[16, 16] #[64, 64]
-        action_dim = int(self.action_space.n)  # number of actions
+        self.inverse_arch = [4, 4] #[16, 16] #[64, 64]
+        if isinstance(self.action_space, spaces.Discrete):
+            action_dim = int(self.action_space.n)  # number of actions
+        else:
+            action_dim = len(self.action_space.sample().flatten())
         inverse_model = create_mlp(self.features_dim*2, action_dim, self.inverse_arch)
         self.inverse_model = nn.Sequential(*inverse_model)
+        self.inv_optimizer = self.optimizer_class(self.inverse_model.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
-        self.forward_arch = [4] #[16, 16] #[64, 64]
-        forward_model = create_mlp(self.features_dim + action_dim, self.features_dim, self.inverse_arch)
+        self.forward_arch = [4, 4] #[16, 16] #[64, 64]
+        forward_model = create_mlp(self.features_dim + action_dim, self.features_dim, self.forward_arch)
         self.forward_model = nn.Sequential(*forward_model)
+        self.forw_optimizer = self.optimizer_class(self.forward_model.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
     def forward(self,
                 obs: th.Tensor,
@@ -1036,8 +1042,9 @@ class ICM(BaseModel):
         state_emb = self.extract_features(obs, self.features_extractor)
         state_emb_next = self.extract_features(obs_next, self.features_extractor)
         action_est = self.inverse_model(th.cat((state_emb, state_emb_next), dim=1))
-        # one hot encode action
-        action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
+        if isinstance(self.action_space, spaces.Discrete):
+            # one hot encode action
+            action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
         action = th.flatten(action, start_dim=1)
         state_emb_next_est = self.forward_model(th.cat((state_emb.detach(), action), dim=1)) # TODO make sure this does not backprop through embedding/extractor
         return state_emb_next, state_emb_next_est, action_est
@@ -1048,18 +1055,38 @@ class ICM(BaseModel):
              action_est: th.Tensor,
              action: th.Tensor,):
         ce = nn.CrossEntropyLoss()
-        forward_mse = nn.MSELoss(reduce=False)
+        forward_mse = nn.MSELoss(reduction='none')
 
-        # one hot encode action
-        action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
+        # TODO identify action space type and do appropriate encoding
+        if isinstance(self.action_space, spaces.Discrete):
+            # one hot encode action
+            action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
         action = th.flatten(action, start_dim=1)
 
-        inverse_loss = ce(action, action_est)
-        forward_loss = forward_mse(state_emb_next.detach(), state_emb_next_est) # is this value r_i
+        # print(f"action {action[0]}")
+        # print(f"action_est {action_est[0]}")
+        # print(f"state_emb_next {state_emb_next[0]}")
+        # print(f"state_emb_next_est {state_emb_next_est[0]}")
+
+        # TODO replace for non discrete
+        inverse_loss = ce(action_est, action)
+        forward_loss = forward_mse(state_emb_next_est, state_emb_next.detach()) # is this value r_i
 
         ri = forward_loss.mean(dim=1)
 
         forward_loss = ri.mean()
+
+        # print(f"inverse_loss {inverse_loss}")
+        # print(f"forward_loss {forward_loss}")
+
+        # parameterst to weigh loss types against each other
+        # and scale (for relation to other loss)
+        # beta = 0.2
+        # lambd = 0.1
+        # forward_loss = beta*forward_loss/lambd
+        # inverse_loss = (1-beta)*inverse_loss/lambd
+        # OBS, subnetworks are optimized separately,
+        # relative weight only changes learning rate (would just change learning rate)
 
         return ri, forward_loss, inverse_loss
 
