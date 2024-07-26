@@ -9,6 +9,7 @@ import utils
 
 from stable_baselines3 import SAC, HerReplayBuffer, DQN
 from stable_baselines3.dqn import DQNwithICM
+from stable_baselines3.sac import SACwithICM
 from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
@@ -184,7 +185,10 @@ def train(base_path: str = "./data/wrapper/",
     if env_id == "SparsePendulumEnv-v1":
         fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
         coord_names = ["x", "y", "ang. vel."]
-        algo = SAC
+        # algo = SAC
+        algo = SACwithICM
+        if baseline_override in ["base-rl", "curious"]:
+            algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
         fixed_goal = lambda obs: np.array([-1.65, -0.02,])
         coord_names = ["xpos", "velocity"]
@@ -258,6 +262,7 @@ def train(base_path: str = "./data/wrapper/",
                 policy_kwargs=dict(net_arch=[256, 256, 256],),
                 seed=policy_seed,
                 device=device,
+                tensorboard_log=log_dir,
     )
 
     if baseline_override is None:

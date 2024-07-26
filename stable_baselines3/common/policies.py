@@ -1054,23 +1054,20 @@ class ICM(BaseModel):
              state_emb_next_est: th.Tensor,
              action_est: th.Tensor,
              action: th.Tensor,):
-        ce = nn.CrossEntropyLoss()
-        forward_mse = nn.MSELoss(reduction='none')
+        cross_entropy_loss = nn.CrossEntropyLoss()
+        mean_square_error_loss = nn.MSELoss(reduction='none')
 
         # TODO identify action space type and do appropriate encoding
         if isinstance(self.action_space, spaces.Discrete):
             # one hot encode action
             action = F.one_hot(action.long(), num_classes=int(self.action_space.n)).float()
-        action = th.flatten(action, start_dim=1)
+            action = th.flatten(action, start_dim=1)
+            inverse_loss = cross_entropy_loss(action_est, action)
+        else: # assumes continnous action
+            action = th.flatten(action, start_dim=1)
+            inverse_loss = mean_square_error_loss(action_est, action).mean()
 
-        # print(f"action {action[0]}")
-        # print(f"action_est {action_est[0]}")
-        # print(f"state_emb_next {state_emb_next[0]}")
-        # print(f"state_emb_next_est {state_emb_next_est[0]}")
-
-        # TODO replace for non discrete
-        inverse_loss = ce(action_est, action)
-        forward_loss = forward_mse(state_emb_next_est, state_emb_next.detach()) # is this value r_i
+        forward_loss = mean_square_error_loss(state_emb_next_est, state_emb_next.detach()) # is this value r_i
 
         ri = forward_loss.mean(dim=1)
 
