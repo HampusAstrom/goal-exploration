@@ -49,8 +49,9 @@ class GoalWrapper(
         # proabaly also support selecting different strategies in this code with sting arguments
         if reward_func is None:
             self.goal_reward = self.flatten_norm_reward
-        else:
-            self.goal_reward = reward_func
+        # TODO unsure how to point to own method at creation, use strings for now
+        elif reward_func == "term":
+            self.goal_reward = self.terminating_binary_norm_reward
 
         self.selection_strategies = None
         self.strat_weights = None
@@ -88,7 +89,8 @@ class GoalWrapper(
         self.num_timesteps += 1
 
         # get goal conditioned reward
-        goal_reward = self.goal_reward(obs, self.goal, info)
+        goal_reward, term = self.goal_reward(obs, self.goal, info)
+        terminated = terminated or term
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
@@ -129,7 +131,9 @@ class GoalWrapper(
                        info,
                        ):
         # get goal conditioned reward
-        goal_reward = self.goal_reward(achieved_goal, desired_goal, info)
+        # TODO now that we added termination from goal eval, we need to handle
+        # it. For now it is ignored when doing hindsight, might be a problem
+        goal_reward, _ = self.goal_reward(achieved_goal, desired_goal, info)
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
@@ -190,13 +194,26 @@ class GoalWrapper(
         else:
             if np.isscalar(distance):
                 if distance <= self.goal_range:
-                    return np.exp(-distance)
+                    return np.exp(-distance), False
                 else:
-                    return 0
+                    return 0, False
             cut = distance > self.goal_range
             ret = np.exp(-distance)
             ret[cut] = 0
-            return ret
+            return ret, False
+
+    def terminating_binary_norm_reward(self,
+                                       achieved_goal,
+                                       desired_goal,
+                                       info,
+                                       ):
+        reward, _  = self.flatten_norm_reward(achieved_goal=achieved_goal,
+                                              desired_goal=desired_goal,
+                                              info=info,)
+        if reward > 0:
+            return 1, True # return 1 reward and terminate True
+        else:
+            return 0, False
 
 class FiveXGoalSelection():
     def __init__(self,
@@ -431,3 +448,22 @@ class FiveXGoalSelection():
         best_cand = candidate_points[ind]
 
         return best_cand
+
+# this is made for evaluation, and for that it assumes that each induvidual
+# statefy it is given is fixed, but it should be usable for other things too
+# make sure to use with rewards that are capped or terminate for clearest reaults
+# it is recommended to use it with terminating_binary_norm_reward to get discrete
+# yes and no answers to goal evaluation
+class OrderedGoalSelection():
+    def __init__(self,
+                 goal_selection_strategies,) -> None:
+        self.selection_strategies = goal_selection_strategies
+        self.ind = 0
+        self.len = len(self.selection_strategies)
+
+    def select_goal(self, obs):
+        ind = self.ind % self.len
+        self.ind += 1
+        if self.ind > self.len:
+            self.ind = 0 # TODO replace, silly override as reset is done one time too many
+        return self.selection_strategies[ind](obs)

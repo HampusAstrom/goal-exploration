@@ -21,7 +21,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 import time
 import yappi
 
-from goal_wrapper import GoalWrapper, FiveXGoalSelection
+from goal_wrapper import GoalWrapper, FiveXGoalSelection, OrderedGoalSelection
 
 from sparse_pendulum import SparsePendulumEnv
 from pathological_mc import PathologicalMountainCarEnv
@@ -184,6 +184,14 @@ def train(base_path: str = "./data/wrapper/",
 
     if env_id == "SparsePendulumEnv-v1":
         fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
+        few_goals = [fixed_goal,
+                     lambda obs: np.array([1.0, 0.0, 3.0]),
+                     lambda obs: np.array([1.0, 0.0, -3.0]),]
+        many_goals = few_goals.copy()
+        many_goals += [lambda obs: np.array([0.7071, 0.7071, 0.0]),
+                       lambda obs: np.array([-0.7071, -0.7071, 0.0]),
+                       lambda obs: np.array([-0.7071, 0.7071, 0.0]),
+                       lambda obs: np.array([0.7071, -0.7071, 0.0]),]
         coord_names = ["x", "y", "ang. vel."]
         # algo = SAC
         algo = SACwithICM
@@ -191,47 +199,105 @@ def train(base_path: str = "./data/wrapper/",
             algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
         fixed_goal = lambda obs: np.array([-1.65, -0.02,])
+        few_goals = [fixed_goal,
+                     lambda obs: np.array([0.55, 0.02,])]
+        many_goals = few_goals.copy()
+        many_goals += [lambda obs: np.array([-0.5, 0.04,]),
+                       lambda obs: np.array([-0.5, -0.04,]),
+                       lambda obs: np.array([-0.7, 0.0,])]
         coord_names = ["xpos", "velocity"]
         # algo = DQN
         algo = DQNwithICM
         if baseline_override in ["base-rl", "curious"]:
             algo = DQN
 
-    # Create log dir where evaluation results will be saved
+    # def setup_eval(self,
+    #                base_path,
+    #                options,
+    #                experiment,
+    #                env_id,
+    #                env_params,
+    #                eval_seed,
+    #                baseline_override,
+    #                goal_range,
+    #                fixed_goal):
+    #     pass
+
+    def setup_eval(eval_type):
+        # Create log dir where evaluation results will be saved
+        if eval_type == "fixed":
+            eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
+        else:
+            eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs" + eval_type)
+        os.makedirs(eval_log_dir, exist_ok=True)
+
+        # Separate evaluation env, with different parameters passed via env_kwargs
+        # Eval environments can be vectorized to speed up evaluation.
+        #eval_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0)
+        #eval_env = GoalPendulumEnv(render_mode="human",
+        #                           fixed_goal=np.array([1.0, 0.0, 0.0]))
+        eval_env = gym.make(env_id, **env_params)#,render_mode="human")
+        if eval_seed is not None:
+            eval_env.reset(seed=eval_seed)
+
+        if eval_type == "few":
+            goal_selector = OrderedGoalSelection(few_goals)
+            goal_selection = goal_selector.select_goal
+            goal_weight=1
+            n_eval_episodes=goal_selector.len
+        if eval_type == "many":
+            goal_selector = OrderedGoalSelection(many_goals)
+            goal_selection = goal_selector.select_goal
+            goal_weight=1
+            n_eval_episodes=goal_selector.len
+        if eval_type == "fixed":
+            goal_selection = fixed_goal
+            goal_weight=0
+            n_eval_episodes=5
+
+
+        # for eval we want to always evaluate with the goal at the top
+        # if weight should be 0 (using real reward, or 1 using goal reward, or a mixture like
+        # in training) can be discussed
+        if baseline_override in [None, "uniform-goal"]:
+            # only evaluate with goal when training with goal
+            eval_env_goal = GoalWrapper(eval_env,
+                                goal_weight=goal_weight,
+                                goal_range=goal_range,
+                                goal_selection_strategies=goal_selection,
+                                reward_func="term")
+        else:
+            eval_env_goal = eval_env # TODO handle that this name becomes missleading
+        eval_env = Monitor(eval_env_goal, eval_log_dir)
+
+        # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
+        # When using multiple training environments, agent will be evaluated every
+        # eval_freq calls to train_env.step(), thus it will be evaluated every
+        # (eval_freq * n_envs) training steps. See EvalCallback doc for more information.
+        # TODO set identical env initiations in eval
+        eval_callback = EvalCallback(eval_env,
+                                    best_model_save_path=eval_log_dir,
+                                    log_path=eval_log_dir,
+                                    eval_freq=max(2000 // n_training_envs, 1),
+                                    n_eval_episodes=n_eval_episodes,
+                                    deterministic=True,
+                                    render=False,
+                                    verbose=verbose)
+
+        return eval_callback
+
+    eval_callback = setup_eval("fixed")
+    if baseline_override in [None, "uniform-goal"]:
+        eval_callback_few = setup_eval("few")
+        eval_callback_many = setup_eval("many")
+        eval_callbacks = CallbackList([eval_callback,
+                                       eval_callback_few,
+                                       eval_callback_many])
+    else:
+        eval_callbacks = CallbackList([eval_callback])
+
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
     os.makedirs(eval_log_dir, exist_ok=True)
-
-    # Separate evaluation env, with different parameters passed via env_kwargs
-    # Eval environments can be vectorized to speed up evaluation.
-    #eval_env = make_vec_env(env_id, n_envs=n_training_envs, seed=0)
-    #eval_env = GoalPendulumEnv(render_mode="human",
-    #                           fixed_goal=np.array([1.0, 0.0, 0.0]))
-    eval_env = gym.make(env_id, **env_params)#,render_mode="human")
-    if eval_seed is not None:
-        eval_env.reset(seed=eval_seed)
-    # for eval we want to always evaluate with the goal at the top
-    # if weight should be 0 (using real reward, or 1 using goal reward, or a mixture like
-    # in training can be discussed)
-    if baseline_override in [None, "uniform-goal"]:
-        # only evaluate with goal when training with goal
-        eval_env = GoalWrapper(eval_env,
-                               goal_weight=0,
-                               goal_range=goal_range,
-                               goal_selection_strategies=fixed_goal)
-    eval_env = Monitor(eval_env, eval_log_dir)
-
-    # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
-    # When using multiple training environments, agent will be evaluated every
-    # eval_freq calls to train_env.step(), thus it will be evaluated every
-    # (eval_freq * n_envs) training steps. See EvalCallback doc for more information.
-    eval_callback = EvalCallback(eval_env,
-                                best_model_save_path=eval_log_dir,
-                                log_path=eval_log_dir,
-                                eval_freq=max(500 // n_training_envs, 1),
-                                n_eval_episodes=5,
-                                deterministic=True,
-                                render=False,
-                                verbose=verbose)
 
     #check_env(train_env)
 
@@ -294,7 +360,8 @@ def train(base_path: str = "./data/wrapper/",
                                                     )
 
         #callback = CallbackList([mapping_callback, eval_callback])
-        callback = CallbackList([eval_callback])
+        #callback = CallbackList([eval_callback])
+        callback = eval_callbacks
 
         #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
         goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
@@ -302,11 +369,11 @@ def train(base_path: str = "./data/wrapper/",
         train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
         train_env_goal.print_setup()
     elif baseline_override == "uniform-goal":
-        callback = eval_callback
+        callback = eval_callbacks
         train_env_goal.set_goal_strategies([train_env_goal.sample_obs_goal])
         train_env_goal.print_setup()
     else:
-        callback = eval_callback
+        callback = eval_callbacks
 
     start_time = time.time()
     model.learn(steps, callback=callback, progress_bar=True)
@@ -318,7 +385,7 @@ def train(base_path: str = "./data/wrapper/",
 
     if baseline_override in [None, "uniform-goal"]:
         targeted_goals = np.stack(train_env_goal.targeted_goals)
-        print(targeted_goals)
+        # print(targeted_goals)
         utils.plot_targeted_goals(targeted_goals,
                                 coord_names,
                                 os.path.join(base_path, options, experiment))
