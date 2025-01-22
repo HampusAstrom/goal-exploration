@@ -52,6 +52,16 @@ class GoalWrapper(
         # TODO unsure how to point to own method at creation, use strings for now
         elif reward_func == "term":
             self.goal_reward = self.terminating_binary_norm_reward
+        elif reward_func == "reselect":
+            self.goal_reward = self.reselecting_binary_norm_reward
+            self.local_reselect = False
+        elif reward_func == "local-reselect":
+            self.goal_reward = self.reselecting_binary_norm_reward
+            self.local_reselect = True
+        else:
+            self.goal_reward = reward_func
+
+        self.obs_scale = self.get_obs_norm()
 
         self.selection_strategies = None
         self.strat_weights = None
@@ -162,6 +172,11 @@ class GoalWrapper(
         print("goal reward function: " + str(self.goal_reward))
         print()
 
+    def get_obs_norm(self):
+        l = self.env.observation_space.low
+        h = self.env.observation_space.high
+        return h - l
+
     def sample_obs_goal(self, obs = None):
         obs_space = self.env.observation_space
 
@@ -210,10 +225,44 @@ class GoalWrapper(
         reward, _  = self.flatten_norm_reward(achieved_goal=achieved_goal,
                                               desired_goal=desired_goal,
                                               info=info,)
-        if reward > 0:
-            return 1, True # return 1 reward and terminate True
-        else:
-            return 0, False
+        success = reward > 0
+        ret = success * 1
+        return ret, success
+
+        # if reward > 0:
+        #     return 1, True # return 1 reward and terminate True
+        # else:
+        #     return 0, False
+
+    def reselecting_binary_norm_reward(self,
+                                       achieved_goal,
+                                       desired_goal,
+                                       info,
+                                       ):
+        reward, term = self.terminating_binary_norm_reward(achieved_goal=achieved_goal,
+                                                        desired_goal=desired_goal,
+                                                        info=info,)
+
+        # If we reached the goal instead of terminating, find a new goal and
+        # strive towards it instead. Either using the same method as at reset
+        # or by selecting a goal near to the current state for local explore
+        # local would benefit from knowing current step/"steps before trunc"
+        if not isinstance(term, np.ndarray) and term: # this should only happen when running, not duing hindsight TODO
+            if self.local_reselect:
+                self.goal = self.select_local_goal(achieved_goal) # assumes goal is obs for now
+            else:
+                self.goal = self.select_goal(achieved_goal) # assumes goal is obs for now
+        return reward, False
+
+    def select_local_goal(self, obs):
+        # we try uniform local selection for now ("local_size" of space in each dimension)
+        local_size = 0.2
+        pert = self.np_random.uniform(-local_size/2,
+                                      local_size/2,
+                                      len(self.obs_scale))*self.obs_scale
+        goal = obs + pert
+        return goal
+
 
 class FiveXGoalSelection():
     def __init__(self,

@@ -71,6 +71,7 @@ def train(base_path: str = "./data/wrapper/",
           fixed_goal_fraction = 0.0,
           device = None,
           goal_selection_params: dict = None,
+          reward_func: str = "term",
           env_params: dict = None,
           env_id = "PathologicalMountainCar-v1.1",
           buffer_size = int(1e6),
@@ -93,7 +94,8 @@ def train(base_path: str = "./data/wrapper/",
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
                 + str(fixed_goal_fraction) + "fixedGoalFraction_" \
-                + str(goal_range) + "goal_range"
+                + str(goal_range) + "goal_range_" \
+                + str(reward_func) + "-reward_func" \
 
         for key, val in goal_selection_params.items():
             if type(val) is list:
@@ -153,6 +155,7 @@ def train(base_path: str = "./data/wrapper/",
                                      if v.default is not inspect.Parameter.empty}
     merged = default_goal_selection_params | goal_selection_params
     conf_params["goal_selection_params"] = merged
+    conf_params["reward_func"] = reward_func
     if baseline_override is not None:
         # if making a baseline, some parameters are ignored, remove from conf
         # for clarity
@@ -174,7 +177,8 @@ def train(base_path: str = "./data/wrapper/",
         # only use when training with goal
         train_env_goal = GoalWrapper(train_env,
                                      goal_weight=goal_weight,
-                                     goal_range=goal_range)
+                                     goal_range=goal_range,
+                                     reward_func=reward_func)
                                      #intrinsic_curiosity_module=ICM(train_env,
                                      #                               device))
     else:
@@ -500,8 +504,9 @@ if __name__ == '__main__':
                          "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
-                         "buffer_size": [20000],
-                         "baseline_override": [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
+                         "reward_func": ["local-reselect"], # "term", "reselect", "local-reselect" # only applies to train, eval terms
+                         "buffer_size": [40000],
+                         "baseline_override": [None], # [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
                          }
 
     base_path = "./temp/wrapper/"
