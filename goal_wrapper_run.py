@@ -108,6 +108,7 @@ def train(base_path: str = "./data/wrapper/",
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
                 + str(goal_range) + "goal_range_" \
+                + str(reward_func) + "-reward_func_" \
                 + baseline_override + "-baseline"
     else:
         options = str(steps) + "steps_" \

@@ -143,7 +143,7 @@ def add_subplot(path, window, ax, eval_type="eval_logs", name=None):
         ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + name)
     else:
         ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
-    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.2,) # alpha=0.03
+    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07,) # alpha=0.03
 
 def plot_all_in_folder(dir,
                        coord_names,
@@ -191,7 +191,7 @@ def plot_all_in_folder(dir,
             add_subplot(folder, window, ax, eval_type=eval_type)
 
     ax.legend(loc='upper left',
-              prop={'size': 28}, # 8
+              prop={'size': 8}, # 8
               fancybox=True,
               framealpha=0.2)#, bbox_to_anchor=(1, 0.5))
     ax.set_xlabel("steps")
