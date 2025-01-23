@@ -41,7 +41,7 @@ def weight_combinations(weights, num):
         configurations.append(lst)
     return configurations
 
-def plot_targeted_goals(goals, coord_names, path):
+def plot_targeted_goals(goals, coord_names, path, figname="goal_spread"):
     assert len(coord_names) == len(goals[1,:])
     order = np.linspace(0, 1, len(goals))
 
@@ -84,7 +84,7 @@ def plot_targeted_goals(goals, coord_names, path):
     fig.colorbar(im, cax=cbar_ax, ticklocation="left")
 
     #plt.tight_layout()
-    plt.savefig(os.path.join(path,"goal_spread"), bbox_inches="tight")
+    plt.savefig(os.path.join(path,figname), bbox_inches="tight")
     plt.close(fig)
 
 def get_all_folders(dir):
@@ -221,7 +221,15 @@ def plot_all_in_folder(dir,
         for exp in experiments:
             goal_file = os.path.join(exp, "goals")
             if os.path.isfile(goal_file):
-                goals = np.loadtxt(goal_file, delimiter=' ')#, skiprows=2, usecols=0)
+                goals = np.loadtxt(goal_file, delimiter=' ')
+                plot_targeted_goals(goals, coord_names,exp)
+            goal_file = os.path.join(exp, "initial_targeted_goals")
+            if os.path.isfile(goal_file):
+                goals = np.loadtxt(goal_file, delimiter=' ')
+                plot_targeted_goals(goals, coord_names,exp,figname="initial_targeted_goals")
+            goal_file = os.path.join(exp, "reselect_goal_spread")
+            if os.path.isfile(goal_file):
+                goals = np.loadtxt(goal_file, delimiter=' ',figname="reselect_goal_spread")
                 plot_targeted_goals(goals, coord_names,exp)
 
 if __name__ == '__main__':

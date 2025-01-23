@@ -86,6 +86,9 @@ class GoalWrapper(
         # seen goals can maybe just we replay buffer from policy algorithm
         # TODO replace with flexible solution
         self.targeted_goals = []
+        self.initial_targeted_goals = []
+        self.local_targeted_goals = []
+        self.successful_goals = []
         self.steps_taken = 0
         self.num_timesteps = 0
         self.currsteps_per_episode = []
@@ -125,6 +128,7 @@ class GoalWrapper(
         self.goal = self.select_goal(obs) # goal selection can require obs info
 
         self.targeted_goals.append(self.goal)
+        self.initial_targeted_goals.append(self.goal)
 
         return self._get_obs(obs), reset_info
 
@@ -248,21 +252,34 @@ class GoalWrapper(
         # or by selecting a goal near to the current state for local explore
         # local would benefit from knowing current step/"steps before trunc"
         if not isinstance(term, np.ndarray) and term: # this should only happen when running, not duing hindsight TODO
+            self.successful_goals.append(self.goal)
             if self.local_reselect:
                 self.goal = self.select_local_goal(achieved_goal) # assumes goal is obs for now
             else:
                 self.goal = self.select_goal(achieved_goal) # assumes goal is obs for now
+            self.targeted_goals.append(self.goal)
+            self.local_targeted_goals.append(self.goal)
         return reward, False
 
     def select_local_goal(self, obs):
         # we try uniform local selection for now ("local_size" of space in each dimension)
-        local_size = 0.2
-        pert = self.np_random.uniform(-local_size/2,
-                                      local_size/2,
-                                      len(self.obs_scale))*self.obs_scale
-        goal = obs + pert
-        return goal
+        bail_counter = 0
 
+        while True:
+            local_size = 0.2
+            pert = self.np_random.uniform(-local_size/2,
+                                        local_size/2,
+                                        len(self.obs_scale))*self.obs_scale
+            goal = obs + pert
+
+            if self.env.observation_space.contains(goal):
+                break
+
+            bail_counter += 1
+            if bail_counter > 100:
+                break
+
+        return goal
 
 class FiveXGoalSelection():
     def __init__(self,

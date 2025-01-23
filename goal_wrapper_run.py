@@ -390,11 +390,28 @@ def train(base_path: str = "./data/wrapper/",
 
     if baseline_override in [None, "uniform-goal"]:
         targeted_goals = np.stack(train_env_goal.targeted_goals)
-        # print(targeted_goals)
         utils.plot_targeted_goals(targeted_goals,
                                 coord_names,
                                 os.path.join(base_path, options, experiment))
         np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
+        initial_targeted_goals = np.stack(train_env_goal.initial_targeted_goals)
+        utils.plot_targeted_goals(initial_targeted_goals,
+                                coord_names,
+                                os.path.join(base_path, options, experiment),
+                                figname="ep_start_goal_spread")
+        np.savetxt(os.path.join(base_path, options, experiment,"initial_targeted_goals"), initial_targeted_goals)
+        local_targeted_goals = np.stack(train_env_goal.local_targeted_goals)
+        utils.plot_targeted_goals(local_targeted_goals,
+                                coord_names,
+                                os.path.join(base_path, options, experiment),
+                                figname="reselect_goal_spread")
+        np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
+        successful_goals = np.stack(train_env_goal.successful_goals)
+        utils.plot_targeted_goals(successful_goals,
+                                coord_names,
+                                os.path.join(base_path, options, experiment),
+                                figname="successful_goal_spread")
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
 
     # mark experiment complete
     with open(os.path.join(base_path, options, experiment, "completed.txt"), 'w') as fp:
