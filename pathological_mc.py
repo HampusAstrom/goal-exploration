@@ -124,6 +124,7 @@ class PathologicalMountainCarEnv(MountainCarEnv):
         self.surf.fill((255, 255, 255))
 
         pos = self.state[0]
+        vel = self.state[1]
 
         xs = np.linspace(self.min_position, self.max_position, 100)
         ys = self._height(xs)
@@ -160,6 +161,13 @@ class PathologicalMountainCarEnv(MountainCarEnv):
             gfxdraw.filled_circle(
                 self.surf, wheel[0], wheel[1], int(carheight / 2.5), (128, 128, 128)
             )
+
+            # adding vector for velocity visualization
+            gfxdraw.hline(self.surf,
+                          int((pos - self.min_position)*scale),
+                          int((pos - self.min_position + vel*10)*scale),
+                          int(clearance + self._height(pos) * scale),
+                          (255,0,0))
 
         # right flag stuff
         flagx = int((self.goal_position - self.min_position) * scale)
