@@ -346,7 +346,7 @@ def train(base_path: str = "./data/wrapper/",
         if goal_selection_params is not None: # assumes that all keys are params to func
             goal_selection = FiveXGoalSelection(train_env_goal,
                                                 model.replay_buffer,
-                                                train_env_goal.targeted_goals,
+                                                train_env_goal.initial_targeted_goals,
                                                 train_steps=steps,
                                                 verbose = verbose > 0,
                                                 **goal_selection_params,)

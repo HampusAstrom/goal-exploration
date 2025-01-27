@@ -285,6 +285,8 @@ class FiveXGoalSelection():
     def __init__(self,
                  env,
                  replay_buffer,
+                 # only use initial goals for now, TODO go back to all
+                 # goals with decay fix
                  targeted_goals_list,
                  train_steps,
                  num_candidates = 10,
@@ -424,6 +426,8 @@ class FiveXGoalSelection():
         else:
             cum_l = np.stack(self.env.currsteps_per_episode)
 
+        # TODO decide how to handle when goals and we look at all goals, not
+        # just initial are re-selected to pass or remove this
         assert len(cum_l) == len(targeted_goals)
 
         goal_decay = 0.5**((cum_l[-1] - cum_l)/self.steps_halflife)
