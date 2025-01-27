@@ -296,6 +296,9 @@ class DQNwithICM(DQN):
         ) -> None:
         super().__init__(*args,**kwargs)
 
+        if not hasattr(self, 'lr_schedule'):
+            self._setup_lr_schedule()
+
         self.icm = ICM(self.lr_schedule,
                        self.env.observation_space["observation"],
                        self.env.action_space,).to(self.device)
