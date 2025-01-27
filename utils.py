@@ -229,8 +229,8 @@ def plot_all_in_folder(dir,
                 plot_targeted_goals(goals, coord_names,exp,figname="initial_targeted_goals")
             goal_file = os.path.join(exp, "reselect_goal_spread")
             if os.path.isfile(goal_file):
-                goals = np.loadtxt(goal_file, delimiter=' ',figname="reselect_goal_spread")
-                plot_targeted_goals(goals, coord_names,exp)
+                goals = np.loadtxt(goal_file, delimiter=' ')
+                plot_targeted_goals(goals, coord_names,exp,figname="reselect_goal_spread")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
