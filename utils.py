@@ -151,7 +151,8 @@ def plot_all_in_folder(dir,
                        keywords=[],
                        filter=None,
                        name_override=None,
-                       eval_type="eval_logs"):
+                       eval_type="eval_logs",
+                       goal_plots=False):
 
     # TODO replace with something that adaps to number of configurations
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink']) *
@@ -216,6 +217,8 @@ def plot_all_in_folder(dir,
     plt.rc('xtick', labelsize=8)    # fontsize of the tick labels
     plt.rc('ytick', labelsize=8)    # fontsize of the tick labels
 
+    if not goal_plots:
+        return
     for folder in folders:
         experiments = get_all_folders(folder)
         for exp in experiments:
@@ -238,6 +241,7 @@ if __name__ == '__main__':
     parser.add_argument('-k', '--keep', nargs='*', default=[])
     parser.add_argument('-f', '--filter', nargs='*', default=[])
     parser.add_argument('-n', '--name_override', nargs='*', default=None)
+    parser.add_argument('-g', '--goal_plots', action='store_true')
     args = parser.parse_args()
 
     #folder, coord_names = "./output/wrapper/SparsePendulumEnv-v1", ["x", "y", "ang. vel."],
@@ -268,4 +272,5 @@ if __name__ == '__main__':
                        filter=args.filter,
                        name_override=args.name_override,
                        eval_type="eval_logsmany",
+                       goal_plots=args.goal_plots,
                        )
