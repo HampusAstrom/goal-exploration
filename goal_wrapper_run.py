@@ -200,7 +200,7 @@ def train(base_path: str = "./data/wrapper/",
         coord_names = ["x", "y", "ang. vel."]
         # algo = SAC
         algo = SACwithICM
-        if baseline_override in ["base-rl", "curious"]:
+        if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
         fixed_goal = lambda obs: np.array([-1.65, -0.02,])
@@ -213,7 +213,7 @@ def train(base_path: str = "./data/wrapper/",
         coord_names = ["xpos", "velocity"]
         # algo = DQN
         algo = DQNwithICM
-        if baseline_override in ["base-rl", "curious"]:
+        if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
 
     # def setup_eval(self,
@@ -287,7 +287,8 @@ def train(base_path: str = "./data/wrapper/",
                                     n_eval_episodes=n_eval_episodes,
                                     deterministic=True,
                                     render=False,
-                                    verbose=verbose)
+                                    verbose=verbose,
+                                    seed=0) # TODO make seed setting variabel?
 
         return eval_callback
 
@@ -400,12 +401,13 @@ def train(base_path: str = "./data/wrapper/",
                                 os.path.join(base_path, options, experiment),
                                 figname="ep_start_goal_spread")
         np.savetxt(os.path.join(base_path, options, experiment,"initial_targeted_goals"), initial_targeted_goals)
-        local_targeted_goals = np.stack(train_env_goal.local_targeted_goals)
-        utils.plot_targeted_goals(local_targeted_goals,
-                                coord_names,
-                                os.path.join(base_path, options, experiment),
-                                figname="reselect_goal_spread")
-        np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
+        if len(train_env_goal.local_targeted_goals) > 0:
+            local_targeted_goals = np.stack(train_env_goal.local_targeted_goals)
+            utils.plot_targeted_goals(local_targeted_goals,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment),
+                                    figname="reselect_goal_spread")
+            np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
         successful_goals = np.stack(train_env_goal.successful_goals)
         utils.plot_targeted_goals(successful_goals,
                                 coord_names,
