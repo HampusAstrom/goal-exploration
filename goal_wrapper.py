@@ -230,6 +230,8 @@ class GoalWrapper(
                                               desired_goal=desired_goal,
                                               info=info,)
         success = reward > 0
+        if not isinstance(success, np.ndarray) and success: # this should only happen when running, not duing hindsight TODO
+            self.successful_goals.append(self.goal)
         ret = success * 1
         return ret, success
 
@@ -252,7 +254,6 @@ class GoalWrapper(
         # or by selecting a goal near to the current state for local explore
         # local would benefit from knowing current step/"steps before trunc"
         if not isinstance(term, np.ndarray) and term: # this should only happen when running, not duing hindsight TODO
-            self.successful_goals.append(self.goal)
             if self.local_reselect:
                 self.goal = self.select_local_goal(achieved_goal) # assumes goal is obs for now
             else:
