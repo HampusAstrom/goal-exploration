@@ -71,12 +71,14 @@ class DummyVecEnv(VecEnv):
             self._save_obs(env_idx, obs)
         return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
 
-    def reset(self) -> VecEnvObs:
+    def reset(self, seed=None) -> VecEnvObs:
+        # Seeds where only used once, no longer (changed to be able to use in verification)
+        # TODO make nicer solution that allows for both behaviours (reset with seed each time
+        # and only use seed first time)
+        self._reset_seeds(seed=seed)
         for env_idx in range(self.num_envs):
             obs, self.reset_infos[env_idx] = self.envs[env_idx].reset(seed=self._seeds[env_idx])
             self._save_obs(env_idx, obs)
-        # Seeds are only used once
-        self._reset_seeds()
         return self._obs_from_buf()
 
     def close(self) -> None:

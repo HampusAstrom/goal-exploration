@@ -372,6 +372,7 @@ class EvalCallback(EventCallback):
         render: bool = False,
         verbose: int = 1,
         warn: bool = True,
+        seed: Union[int, None] = None,
     ):
         super().__init__(callback_after_eval, verbose=verbose)
 
@@ -387,6 +388,7 @@ class EvalCallback(EventCallback):
         self.deterministic = deterministic
         self.render = render
         self.warn = warn
+        self.seed = seed
 
         # Convert to VecEnv for consistency
         if not isinstance(eval_env, VecEnv):
@@ -463,6 +465,7 @@ class EvalCallback(EventCallback):
                 return_episode_rewards=True,
                 warn=self.warn,
                 callback=self._log_success_callback,
+                seed=self.seed
             )
 
             if self.log_path is not None:

@@ -541,6 +541,7 @@ if __name__ == '__main__':
         completed_exps = train(base_path = base_path,
                                verbose = 0,
                                test_needed_experiments = True,
+                               eval_seed = 2, # seeds 2,3 on the easeir side in path MC, seed 0 at the bottom, 4 on hard side
                                **conf)
         total_planned += conf["experiments"]
         total_found += min(len(completed_exps), conf["experiments"])

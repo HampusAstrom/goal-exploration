@@ -89,11 +89,11 @@ class VecEnv(ABC):
 
         self.metadata = {"render_modes": render_modes}
 
-    def _reset_seeds(self) -> None:
+    def _reset_seeds(self, seed=None) -> None:
         """
         Reset the seeds that are going to be used at the next reset.
         """
-        self._seeds = [None for _ in range(self.num_envs)]
+        self._seeds = [seed for _ in range(self.num_envs)]
 
     @abstractmethod
     def reset(self) -> VecEnvObs:
