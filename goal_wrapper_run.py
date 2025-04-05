@@ -418,7 +418,17 @@ def train(base_path: str = "./data/wrapper/",
 
     # mark experiment complete
     with open(os.path.join(base_path, options, experiment, "completed.txt"), 'w') as fp:
-        pass
+        # hacky extra info to be able to read monitor data instead of evaluation.npz
+        # as it has the wrong metric (raw reward instead of both that and if applicable
+        # success rate)
+        if env_id == "PathologicalMountainCar-v1.1":
+            fp.write('eval_logs 5\n')
+            fp.write('eval_logsfew 2\n')
+            fp.write('eval_logsmany 5\n')
+        elif env_id == "SparsePendulumEnv-v1":
+            fp.write('eval_logs 5\n')
+            fp.write('eval_logsfew 2\n')
+            fp.write('eval_logsmany 5\n')
 
 #model.load(model_path, eval_env)
 

@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import Divider, Size
 import os
+import csv
 import argparse
 from cycler import cycler
 from itertools import combinations
@@ -121,29 +122,88 @@ def get_best_x(folders, num2keep, frac_to_eval=0.2, eval_type="eval_logs"):
 
     return np.array(folders)[ind]
 
-def add_subplot(path, window, ax, eval_type="eval_logs", name=None):
-    datas = []
-    experiments = get_all_folders(path)
+def collect_datas(experiments, eval_type="eval_logs"):
+    values = []
+    means = []
     for exp in experiments:
         if not os.path.exists(os.path.join(exp, eval_type)):
-            return
+            return None, None
         data = np.loadtxt(os.path.join(exp, eval_type, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
         #avg_data = np.convolve(data, [1]*window, 'valid')/window
+        # monitor is sequential, so we need to bundle it by number of experiments
+        # in each evaluation, that info is found in completed.txt for now
+        # TODO replace this with data from evaluations.npz when it collects correctly
         if os.path.isfile(os.path.join(exp, "completed.txt")):
-            datas.append(data)
-    #avg_data = np.mean(datas, axis=0)
-    #avg_std = np.std(datas, axis=0)
-    data = np.mean(datas, axis=0)
-    std = np.std(datas, axis=0)
+            with open(os.path.join(exp, "completed.txt"),'r') as measure_info:
+                reader = csv.reader(measure_info, delimiter=' ')
+                m_info = {k: int(v) for [k, v] in reader}
+
+            data = np.reshape(data, (-1,m_info[eval_type]))
+
+            # TODO calculate mean (and return separate data too?)
+            mean = np.mean(data, axis=1)
+
+            means.append(mean)
+            values.append(data)
+
+    return means, values
+
+def add_subplot(path, window, ax, eval_type="eval_logs", name=None):
+    experiments = get_all_folders(path)
+    means, values = collect_datas(experiments, eval_type=eval_type)
+    if means is None:
+        return
+
+    data = np.mean(means, axis=0)
+    std = np.std(means, axis=0)
     avg_data = np.convolve(data, [1]*window, 'valid')/window
     avg_std = np.convolve(std, [1]*window, 'valid')/window
-    #x = range(len(avg_data))
-    x = np.linspace(0, len(avg_data)*400, len(avg_data))
+    x = np.linspace(0, len(avg_data)*400, len(avg_data)) # TODO this assumes 400 steps between evals
     if name != None:
         ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + name)
     else:
         ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07,) # alpha=0.03
+
+def plot_individual_experiments(path, window, eval_type="eval_logs", figname=None):
+    experiments = get_all_folders(path)
+    means, values = collect_datas(experiments, eval_type=eval_type)
+    if means is None:
+        return
+
+    # prep fig/ax
+    px = 1/plt.rcParams['figure.dpi']
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
+
+    # plot the mean
+    data = np.mean(means, axis=0)
+    std = np.std(means, axis=0)
+    avg_data = np.convolve(data, [1]*window, 'valid')/window
+    avg_std = np.convolve(std, [1]*window, 'valid')/window
+    x = np.linspace(0, len(avg_data)*400, len(avg_data)) # TODO this assumes 400 steps between evals
+    ax.plot(x, avg_data, label="average", zorder=100)
+    # if name != None:
+    #     ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + name)
+    # else:
+    #     ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
+    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07, zorder=100) # alpha=0.03
+
+    # plot each
+    for i, exp in enumerate(means):
+        data = np.convolve(exp, [1]*window, 'valid')/window
+        x = np.linspace(0, len(data)*400, len(data)) # TODO this assumes 400 steps between evals
+        ax.plot(x, data, label=i)
+
+    # legend
+    ax.legend(loc='upper left',
+            prop={'size': 8}, # 8
+            fancybox=True,
+            framealpha=0.2)#, bbox_to_anchor=(1, 0.5))
+
+    # Save
+    plt.savefig(os.path.join(path,figname), bbox_inches="tight")
+    plt.close(fig)
+
 
 def plot_all_in_folder(dir,
                        coord_names,
@@ -165,7 +225,7 @@ def plot_all_in_folder(dir,
 
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
-    window = 200
+    window = 50
 
     # get all experiments
     folders = get_all_folders(dir)
@@ -217,8 +277,20 @@ def plot_all_in_folder(dir,
     plt.rc('xtick', labelsize=8)    # fontsize of the tick labels
     plt.rc('ytick', labelsize=8)    # fontsize of the tick labels
 
+    # plot individal experiments with means
+    for folder in folders:
+        plot_individual_experiments(folder,
+                                    window=window,
+                                    eval_type=eval_type,
+                                    figname=f"window{window}_" + name)
+        plot_individual_experiments(folder,
+                                    window=1,
+                                    eval_type=eval_type,
+                                    figname="unsmoothed_" + name)
+
     if not goal_plots:
         return
+    # plot goals
     for folder in folders:
         experiments = get_all_folders(folder)
         for exp in experiments:
