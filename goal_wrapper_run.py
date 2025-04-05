@@ -288,7 +288,7 @@ def train(base_path: str = "./data/wrapper/",
                                     deterministic=True,
                                     render=False,
                                     verbose=verbose,
-                                    seed=0) # TODO make seed setting variabel?
+                                    seed=eval_seed)
 
         return eval_callback
 
@@ -299,6 +299,7 @@ def train(base_path: str = "./data/wrapper/",
         eval_callbacks = CallbackList([eval_callback,
                                        eval_callback_few,
                                        eval_callback_many])
+        # TODO this is a bit inefficient, we could gain speed
     else:
         eval_callbacks = CallbackList([eval_callback])
 
