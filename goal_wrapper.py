@@ -89,9 +89,11 @@ class GoalWrapper(
         self.initial_targeted_goals = []
         self.local_targeted_goals = []
         self.successful_goals = []
+        self.successful_goal_index = []
         self.steps_taken = 0
         self.num_timesteps = 0
         self.currsteps_per_episode = []
+        self.goal_selector_obj = None
 
     def step(
             self,
@@ -102,7 +104,7 @@ class GoalWrapper(
         self.num_timesteps += 1
 
         # get goal conditioned reward
-        goal_reward, term = self.goal_reward(obs, self.goal, info)
+        goal_reward, term, success = self.goal_reward(obs, self.goal, info)
         terminated = terminated or term
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
@@ -147,7 +149,7 @@ class GoalWrapper(
         # get goal conditioned reward
         # TODO now that we added termination from goal eval, we need to handle
         # it. For now it is ignored when doing hindsight, might be a problem
-        goal_reward, _ = self.goal_reward(achieved_goal, desired_goal, info)
+        goal_reward, _, _ = self.goal_reward(achieved_goal, desired_goal, info)
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
@@ -209,31 +211,32 @@ class GoalWrapper(
         distance = np.linalg.norm(flat_achi - flat_goal, axis=-1)
         # for now returning dense reward, hard to extimate generic cutoff value
         if self.goal_range <= 0:
-            return np.exp(-distance)
+            return np.exp(-distance), False, False
         else:
             if np.isscalar(distance):
                 if distance <= self.goal_range:
-                    return np.exp(-distance), False
+                    return np.exp(-distance), False, True
                 else:
-                    return 0, False
+                    return 0, False, False
             cut = distance > self.goal_range
             ret = np.exp(-distance)
             ret[cut] = 0
-            return ret, False
+            return ret, False, False # TODO success/term only used when collecting data?
 
     def terminating_binary_norm_reward(self,
                                        achieved_goal,
                                        desired_goal,
                                        info,
                                        ):
-        reward, _  = self.flatten_norm_reward(achieved_goal=achieved_goal,
+        reward, _, _  = self.flatten_norm_reward(achieved_goal=achieved_goal,
                                               desired_goal=desired_goal,
                                               info=info,)
         success = reward > 0
         if not isinstance(success, np.ndarray) and success: # this should only happen when running, not duing hindsight TODO
             self.successful_goals.append(self.goal)
+            self.successful_goal_index.append(len(self.targeted_goals)-1)
         ret = success * 1
-        return ret, success
+        return ret, success, success
 
         # if reward > 0:
         #     return 1, True # return 1 reward and terminate True
@@ -245,7 +248,7 @@ class GoalWrapper(
                                        desired_goal,
                                        info,
                                        ):
-        reward, term = self.terminating_binary_norm_reward(achieved_goal=achieved_goal,
+        reward, term, success = self.terminating_binary_norm_reward(achieved_goal=achieved_goal,
                                                         desired_goal=desired_goal,
                                                         info=info,)
 
@@ -260,7 +263,7 @@ class GoalWrapper(
                 self.goal = self.select_goal(achieved_goal) # assumes goal is obs for now
             self.targeted_goals.append(self.goal)
             self.local_targeted_goals.append(self.goal)
-        return reward, False
+        return reward, False, success
 
     def select_local_goal(self, obs):
         # we try uniform local selection for now ("local_size" of space in each dimension)

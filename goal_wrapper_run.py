@@ -415,6 +415,27 @@ def train(base_path: str = "./data/wrapper/",
                                 os.path.join(base_path, options, experiment),
                                 figname="successful_goal_spread")
         np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
+        successful_goal_index = np.stack(train_env_goal.successful_goal_index)
+        # TODO make plot for goal success over time, maybe also shift color in plot above by time
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_index"), successful_goal_index)
+
+    if baseline_override in ["grid-novelty"]:
+        np.savetxt(os.path.join(base_path, options, experiment,"n_shape"),
+                   goal_selection.shape)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_cell_size"),
+                   goal_selection.cell_size)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_visits"),
+                   goal_selection.visits)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_last_visit"),
+                   goal_selection.last_visit)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_targeted"),
+                   goal_selection.targeted)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_succeded"),
+                   goal_selection.succeded)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_latest_targeted"),
+                   goal_selection.latest_targeted)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_latest_succeded"),
+                   goal_selection.latest_succeded)
 
     # mark experiment complete
     with open(os.path.join(base_path, options, experiment, "completed.txt"), 'w') as fp:
