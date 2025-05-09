@@ -57,6 +57,13 @@ def plot_targeted_goals(goals, coord_names, path, figname="goal_spread"):
         if col < row:
             continue # don't plot diagonal
         ax = fig.add_subplot(len(coord_names)-1, len(coord_names)-1, i+1)
+        # add markers for goal areas
+        # TODO hardcoded override for patho MC
+        ax.fill_between([0, 0.07], [0.63, 0.63], [0.5, 0.5],
+                        alpha=0.5, fc="salmon", ec="red")
+        ax.fill_between([-0.07, 0], [-1.6, -1.6], [-1.73, -1.73],
+                        alpha=0.5, fc="gold", ec="goldenrod")
+
         im = ax.scatter(goals[:,col+1], goals[:,row], c=order, s=1)
         if row == 0:
             ax.set_xlabel(coord_names[col+1])
@@ -74,12 +81,6 @@ def plot_targeted_goals(goals, coord_names, path, figname="goal_spread"):
         #ax.set_xticks([], minor=True)
         #ax.set_yticks([])
         #ax.set_yticks([], minor=True)
-
-    # add markers for goal areas
-    ax.fill_between([0, 0.07], [0.63, 0.63], [0.5, 0.5],
-                    alpha=0.5, fc="salmon", ec="red")
-    ax.fill_between([-0.07, 0], [-1.6, -1.6], [-1.73, -1.73],
-                    alpha=0.5, fc="gold", ec="goldenrod")
 
     cbar_ax = fig.add_axes([0.05, 0.15, 0.05, 0.7])
     fig.colorbar(im, cax=cbar_ax, ticklocation="left")
@@ -216,7 +217,7 @@ def plot_all_in_folder(dir,
 
     # TODO replace with something that adaps to number of configurations
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink']) *
-                           cycler('linestyle', ['-', ]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+                           cycler('linestyle', ['-', ':', '--', '-.']))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
 
     plt.rc('axes', titlesize=20)     # fontsize of the axes title
     plt.rc('axes', labelsize=28)    # fontsize of the x and y labels
@@ -225,7 +226,7 @@ def plot_all_in_folder(dir,
 
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
-    window = 50
+    window = 200
 
     # get all experiments
     folders = get_all_folders(dir)
@@ -244,6 +245,13 @@ def plot_all_in_folder(dir,
     folders = np.unique(np.concatenate((folders,np.array(base))))
 
     folders = sorted(folders)
+
+    # make sure rl-base is always last, for readability as it is not in all graphs
+    folders_end = []
+    for i, str in enumerate(folders):
+        if ("base-rl" in str):
+            folders_end.append(folders.pop(i))
+    folders += folders_end
 
     for i, folder in enumerate(folders):
         if name_override != None:
