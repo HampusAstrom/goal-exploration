@@ -59,6 +59,54 @@ class MapGoalComponentsCallback(BaseCallback):
 
         return True # never stop training
 
+class ChangeParamCallback(BaseCallback):
+    # TODO this class is extremely hacky, replace later
+    def __init__(self,
+                 total_steps,
+                 object,
+                 val_name_chain,
+                 start_val,
+                 end_val,
+                 change_fraction=None,
+                 verbose=0):
+        super(ChangeParamCallback, self).__init__(verbose)
+        self.total_steps = total_steps
+        self.change_fraction = change_fraction # used if binary switch, gradual otherwise
+        self.triggered = False # used if binary switch, gradual otherwise
+        self.object = object
+        self.val_name_chain = val_name_chain
+        self.start_val = start_val
+        self.end_val = end_val
+
+    def set_val(self, prev_attr, remaining_name_chain, val):
+        if len(remaining_name_chain) == 1:
+            setattr(prev_attr, remaining_name_chain[0], val)
+            if self.verbose >= 2:
+                print(f"Set {remaining_name_chain[0]} to \
+                    {getattr(prev_attr, remaining_name_chain[0], val)} \
+                        in {prev_attr}")
+            return
+        attr = getattr(prev_attr, remaining_name_chain.pop(0))
+        self.set_val(attr, remaining_name_chain, val)
+
+    def _on_training_start(self):
+        self.set_val(self.object, self.val_name_chain.copy(), self.start_val)
+
+    def _on_rollout_end(self) -> bool:
+        if self.change_fraction is not None and \
+           not self.triggered and \
+           self.num_timesteps > self.total_steps*self.change_fraction:
+            self.triggered = True
+            self.set_val(self.object, self.val_name_chain.copy(), self.end_val)
+            return True # ends training early if False
+        if self.change_fraction is None:
+            val = self.start_val \
+                + (self.num_timesteps/self.total_steps)*(self.end_val-self.start_val)
+            self.set_val(self.object, self.val_name_chain.copy(), val)
+            return True # ends training early if False
+
+    def _on_step(self) -> bool:
+        return super()._on_step()
 
 def train(base_path: str = "./data/wrapper/",
           steps: int = 10000,
@@ -111,7 +159,7 @@ def train(base_path: str = "./data/wrapper/",
                 + str(goal_range) + "goal_range_" \
                 + str(reward_func) + "-reward_func_" \
                 + baseline_override + "-baseline"
-    else:
+    if baseline_override in ["base-rl", "curious"]:
         options = str(steps) + "steps_" \
                 + baseline_override + "-baseline"
 
@@ -342,6 +390,16 @@ def train(base_path: str = "./data/wrapper/",
                 device=device,
                 tensorboard_log=log_dir,
     )
+
+    #model.replay_buffer.her_ratio = 0
+    callback_list = eval_callbacks.callbacks
+    # callback_list.append(ChangeParamCallback(total_steps=steps,
+    #                                          object=model,
+    #                                          val_name_chain=["replay_buffer", "her_ratio"],
+    #                                          start_val=0.8,
+    #                                          end_val=0,
+    #                                          change_fraction=None))
+    eval_callbacks = CallbackList(callback_list)
 
     if baseline_override is None:
         # TODO a smart goal selection needs access to buffer of seen states and of targeted goals
