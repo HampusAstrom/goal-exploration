@@ -18,7 +18,9 @@ from pathological_mc import PathologicalMountainCarEnv
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="seeds 2,3 on the easeir side in path MC, seed 0 at the bottom, 4 on hard side")
     # parser.add_argument('-g', '--goals', nargs='*', default=[[-1.65, -0.02,]])
-    parser.add_argument('-g', '--goal', default=[-1.65, -0.02,])
+    #parser.add_argument('-n', '--name', default="/home/hampus/rl/goal-exploration/output/wrapper/PathologicalMountainCar-v1.1/2000000steps_grid-novelty-baseline_256-256-256-256-256net/exp1/model.zip")
+    parser.add_argument('-n', '--name', default="/home/hampus/rl/goal-exploration/output/wrapper/PathologicalMountainCar-v1.1/10000000steps_grid-novelty-baseline_batch_size512_train_freq512_lr_1e-4_5x256net/exp1/model.zip")
+    parser.add_argument('-g', '--goal', default=None)
     parser.add_argument('-s', '--seed', type=int , default=None)
     args = parser.parse_args()
 
@@ -27,11 +29,16 @@ if __name__ == '__main__':
 
     # env = gym.make("CartPole-v1", render_mode="rgb_array")  # replace with your environment
     env = gym.make(env_id, terminate=True, ) #render_mode="rgb_array") #, render_mode='human')
+    if args.goal is None:
+        goal = np.array([-1.65, -0.02,])
+    else:
+        goal = np.fromstring(args.goal, dtype=float, sep=' ')
+
     env = GoalWrapper(env,
                     goal_weight=1.0,
                     goal_range=0.1,
                     reward_func="local-reselect",
-                    goal_selection_strategies = lambda obs: args.goal)
+                    goal_selection_strategies = lambda obs: goal)
     # Add monitor wrapper? prob not?
 
     # env = RecordVideo(env, video_folder="test_video", name_prefix="eval",
@@ -41,8 +48,8 @@ if __name__ == '__main__':
     # TODO add wrapper to store trajectories
 
     # load the saved movel
-    model = DQNwithICM.load("/home/hampus/rl/goal-exploration/output/wrapper/PathologicalMountainCar-v1.1/2000000steps_1.0goalrewardWeight_0.0fixedGoalFraction_0.1goal_range_local-reselect-reward_func_0.2exploit_dist_0.01expand_dist_[1,1,1,1,1]component_weights_500steps_halflife_escalate_exploit_norm_comps_100000buffer_size/exp1/model.zip",
-                     env=env)
+    model = DQNwithICM.load(args.name,
+                            env=env)
 
     trajs = []
 
@@ -74,14 +81,15 @@ if __name__ == '__main__':
         ax = plt.subplot(int(np.ceil(np.sqrt(num_eval_episodes))),
                          int(np.ceil(np.sqrt(num_eval_episodes))),
                          i+1)
-        pos, val = zip(*traj)
+        pos, vel = zip(*traj)
         col = range(len(pos))
-        ax.scatter(val, pos, c=col)
+        ax.scatter(vel, pos, c=col, marker='.')
         ax.set_title(f"Length {len(pos)}")
         # add markers for goal areas
         ax.fill_between([0, 0.07], [0.63, 0.63], [0.5, 0.5],
                         alpha=0.5, fc="salmon", ec="red")
         ax.fill_between([-0.07, 0], [-1.6, -1.6], [-1.73, -1.73],
                         alpha=0.5, fc="gold", ec="goldenrod")
-        ax.scatter(0, -0.473409, c="r")
+        ax.scatter(0, -0.473409, c="r", marker='x')
+        ax.scatter(goal[1], goal[0], c="k", marker='x')
     plt.show()
