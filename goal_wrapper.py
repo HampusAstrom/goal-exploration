@@ -119,6 +119,13 @@ class GoalWrapper(
 
         #self.seen_goals.append(obs)
 
+        # if goal selection strategy has an on step method for collecting data,
+        # do so here
+        if self.goal_selector_obj is not None:
+            on_step = getattr(self.goal_selector_obj, "on_step", None)
+            if callable(on_step):
+                on_step(obs, success) # TODO maybe pass all possible info any could use?
+
         return self._get_obs(obs), totreward, terminated, truncated, info
 
     def reset(self, **kwargs):
@@ -156,7 +163,10 @@ class GoalWrapper(
         er = np.array([dct["extrinsic_reward"] for dct in info])
         return gw*goal_reward + (1-gw)*er
 
-    def set_goal_strategies(self, goal_selection_strategies, goal_sel_strat_weight=None):
+    def set_goal_strategies(self,
+                            goal_selection_strategies,
+                            goal_sel_strat_weight=None,
+                            goal_selector_obj=None):
         # if list of selection strategies but not weights, uniform is assumed
         self.selection_strategies = goal_selection_strategies
         if goal_sel_strat_weight is None:
@@ -164,6 +174,7 @@ class GoalWrapper(
         else:
             self.strat_weights = goal_sel_strat_weight
         self.select_goal = self.multi_strat_goal_selection
+        self.goal_selector_obj = goal_selector_obj # TODO replace with less messy linkup, overhaul
 
     def link_buffer(self, buffer):
         self.replay_buffer = buffer
@@ -541,3 +552,149 @@ class OrderedGoalSelection():
         if self.ind > self.len:
             self.ind = 0 # TODO replace, silly override as reset is done one time too many
         return self.selection_strategies[ind](obs)
+
+class GridNoveltySelection():
+    def __init__(self,
+                 env: gym.Env,
+                 train_steps,
+                 size, # for now in number of cells, later also by env dim
+                 ) -> None:
+        self.env = env
+        self.train_steps = train_steps
+        self.curr_step = 0
+        # TODO version for int to scale grid, and version with array describing
+        # size of grid in each direction
+
+        dims = gym.spaces.utils.flatdim(self.env.observation_space["observation"])
+        self.high = self.env.observation_space["observation"].high
+        self.low = self.env.observation_space["observation"].low
+
+        # TODO handle if this needs flattening
+        self.shape = [int(size**(1/dims))]*dims
+        # TODO handle non-closed dims
+        self.cell_size = (self.high-self.low)/self.shape
+
+        # grids tracking seen obs
+        self.visits = np.zeros(shape=self.shape, dtype=int)
+        self.last_visit = np.zeros(shape=self.shape, dtype=int)
+
+        # grids tracking targeted goals
+        self.targeted = np.zeros(shape=self.shape, dtype=int)
+        self.succeded = np.zeros(shape=self.shape, dtype=int)
+        self.latest_targeted = np.zeros(shape=self.shape, dtype=int)
+        self.latest_succeded = np.zeros(shape=self.shape, dtype=int)
+
+        # TODO consider if we track streak too (negative val -> fail streak)
+        # then we need to track failures explicitly, not just implicitly
+
+        # temp testing
+        # obs = self.env.observation_space.sample()
+        #self.on_step(obs, False)
+        # self.novelty_select()
+        # self.visits[0,0] = 1
+        # self.curr_step += 1
+        # self.visits[1,0] = 1
+        # self.curr_step += 1
+        # self.visits[1,5] = 1
+        # self.curr_step += 1
+        # self.weighted_novelty_select()
+        # self.weighted_novelty_select()
+        # self.weighted_novelty_select()
+
+        # exit()
+
+
+    def select_goal(self, obs):
+        # TODO select between methods based on initialized selection/probabilities
+
+        if True: #or self.curr_step < 0.7*self.train_steps:# or np.random.rand() < 0.5:
+            cell = self.weighted_novelty_select()
+            goal = self.sample_in_cell(cell)
+        else:
+            #goal = np.array([-1.65, -0.02,])
+            goal = np.array([-1.65, -0.02,])
+            cell = self.point2cell(goal)
+            #goal = self.sample_in_cell(cell)
+        # selecting with weight inverse to cell visitation
+        # select lowest only (probably unstable)
+        # select uniform on seen
+        # select uniform on all
+        # select based on time since visited
+        # select based on goal success rate in cell, range low and high, or closet to val
+        # select on time since targeted
+        # select on time since successful?
+        # select % for separate strategies above
+
+        # in either strategy is guess we need a uniform random selection in cell
+
+        # TODO make option for local goal selection within this method too
+        # possibly with expanding option to be used for initial selection too
+
+        self.targeted[cell] += 1
+        self.latest_targeted[cell] = self.curr_step
+        return goal
+
+    def novelty_select(self):
+        # chooses one of the cells that are visited, but with the lowest count
+        # or any cell if none are visited
+        filtered = self.visits[np.nonzero(self.visits)]
+        if len(filtered) == 0: # if no non-zero candidates, all grid cells are candidates
+            filtered = self.visits
+        lowest_val = filtered.min()
+        lowest_cells = np.argwhere(self.visits == lowest_val)
+        ind = np.random.choice(len(lowest_cells))
+        cell = lowest_cells[ind]
+        return cell
+
+    def weighted_novelty_select(self):
+        # chooses one of the cells that are visited, weighted toward the one
+        # with the lowest count, or any cell if none are visited
+
+        # if no data yet, select random cell
+        if self.curr_step <= 0:
+            point = self.env.unwrapped.observation_space.sample()
+            return self.point2cell(point)
+
+        # create novelty weight of cells
+        # normalize visits to 1
+        # calc softmin weight of visits (torch implementation seems bugged)
+        # exclude 0 visit cells
+        norm_visits = self.visits/self.curr_step
+        weight = np.exp(-norm_visits)
+        weight_normed = weight/np.sum(weight[np.nonzero(self.visits)])
+        weight_normed[self.visits == 0] = 0
+
+        # flatten weights and select flattened index with weighted choice
+        ind = np.random.choice(self.visits.size, p=weight_normed.flatten())
+        cell = np.unravel_index(ind, self.visits.shape)
+        return cell
+
+
+    def on_step(self, obs, success):
+        # TODO should this be called on reset() too?
+        self.curr_step += 1
+        cell = self.point2cell(obs)
+        self.visits[cell] += 1
+        self.last_visit[cell] = self.curr_step
+
+        # track goal success here, goal targeting when selecting
+        if success:
+            self.succeded[cell] += 1
+            self.latest_succeded[cell] = self.curr_step
+
+        # TODO add success/fail streak update if we track it
+
+    def sample_in_cell(self, cell):
+        # select a goal in this cell
+        rand = np.random.rand(len(self.shape))
+        return self.low + (cell+rand)*self.cell_size
+
+    def point2cell(self, obs):
+        # obs = obs["observation"]
+        cell = tuple(np.floor((obs-self.low)/self.cell_size).astype(int))
+        # TODO replace with nicer solution
+        ret = list(cell)
+        for i, v in enumerate(cell):
+            ret[i] = min(max(cell[i], 0), self.shape[i]-1)
+        #cell = min(cell, )
+        return tuple(ret)

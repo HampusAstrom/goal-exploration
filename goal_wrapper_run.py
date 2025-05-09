@@ -21,7 +21,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 import time
 import yappi
 
-from goal_wrapper import GoalWrapper, FiveXGoalSelection, OrderedGoalSelection
+from goal_wrapper import GoalWrapper, FiveXGoalSelection, OrderedGoalSelection, GridNoveltySelection
 
 from sparse_pendulum import SparsePendulumEnv
 from pathological_mc import PathologicalMountainCarEnv
@@ -90,13 +90,14 @@ def train(base_path: str = "./data/wrapper/",
     # Collect variables to store in json before cluttered
     conf_params = locals()
 
-    if baseline_override is None:
+    if baseline_override in [None, "grid-novelty"]:
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
                 + str(fixed_goal_fraction) + "fixedGoalFraction_" \
                 + str(goal_range) + "goal_range_" \
                 + str(reward_func) + "-reward_func" \
 
+    if baseline_override is None:
         for key, val in goal_selection_params.items():
             if type(val) is list:
                 options += "_[" + ",".join(str(v) for v in val) + "]" + key
@@ -174,7 +175,8 @@ def train(base_path: str = "./data/wrapper/",
         train_env.reset(seed=train_seed)
 
     # wrap with goal conditioning and monitor wrappers
-    if baseline_override in [None, "uniform-goal"]:
+    # TODO replace all these checks with non-listed logic
+    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         # only use when training with goal
         train_env_goal = GoalWrapper(train_env,
                                      goal_weight=goal_weight,
@@ -264,7 +266,8 @@ def train(base_path: str = "./data/wrapper/",
         # for eval we want to always evaluate with the goal at the top
         # if weight should be 0 (using real reward, or 1 using goal reward, or a mixture like
         # in training) can be discussed
-        if baseline_override in [None, "uniform-goal"]:
+        # TODO replace all these checks with non-listed logic
+        if baseline_override in [None, "uniform-goal", "grid-novelty"]:
             # only evaluate with goal when training with goal
             eval_env_goal = GoalWrapper(eval_env,
                                 goal_weight=goal_weight,
@@ -293,7 +296,8 @@ def train(base_path: str = "./data/wrapper/",
         return eval_callback
 
     eval_callback = setup_eval("fixed")
-    if baseline_override in [None, "uniform-goal"]:
+    # TODO replace all these checks with non-listed logic
+    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         eval_callback_few = setup_eval("few")
         eval_callback_many = setup_eval("many")
         eval_callbacks = CallbackList([eval_callback,
@@ -308,7 +312,8 @@ def train(base_path: str = "./data/wrapper/",
 
     #check_env(train_env)
 
-    if baseline_override in [None, "uniform-goal"]:
+    # TODO replace all these checks with non-listed logic
+    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         # only use HER buffer when training with goal
         policy = "MultiInputPolicy"
         algo_kwargs = {"replay_buffer_class": HerReplayBuffer,
@@ -379,8 +384,22 @@ def train(base_path: str = "./data/wrapper/",
         callback = eval_callbacks
         train_env_goal.set_goal_strategies([train_env_goal.sample_obs_goal])
         train_env_goal.print_setup()
+    elif baseline_override == "grid-novelty":
+        callback = eval_callbacks
+        goal_selection = GridNoveltySelection(train_env_goal,
+                                              train_steps=steps,
+                                              size=10000 # leave for goal_selection_params later
+                                              )
+        goal_selection_strategies = [goal_selection.select_goal, fixed_goal]
+        goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
+        train_env_goal.set_goal_strategies(goal_selection_strategies,
+                                           goal_sel_strat_weight,
+                                           goal_selector_obj=goal_selection)
+        train_env_goal.print_setup()
     else:
         callback = eval_callbacks
+
+    print(model.policy)
 
     start_time = time.time()
     model.learn(steps, callback=callback, progress_bar=True)
@@ -390,7 +409,7 @@ def train(base_path: str = "./data/wrapper/",
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
 
-    if baseline_override in [None, "uniform-goal"]:
+    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         targeted_goals = np.stack(train_env_goal.targeted_goals)
         utils.plot_targeted_goals(targeted_goals,
                                 coord_names,
@@ -556,9 +575,9 @@ if __name__ == '__main__':
                          "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
-                         "reward_func": ["local-reselect"], # "term", "reselect", "local-reselect" # only applies to train, eval terms
-                         "buffer_size": [40000],
-                         "baseline_override": [None], # [None] #["base-rl", "uniform-goal"]  # should be if not doing baseline None
+                         "reward_func": ["reselect"], # "term", "reselect", "local-reselect" # only applies to train, eval terms
+                         "buffer_size": [1000000],
+                         "baseline_override": ["grid-novelty"], # [None] #["base-rl", "uniform-goal", "grid-novelty"]  # should be if not doing baseline None
                          }
 
     base_path = "./temp/wrapper/"
