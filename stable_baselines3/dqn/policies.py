@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, Union
 
 import torch as th
 from gymnasium import spaces
@@ -35,7 +35,7 @@ class QNetwork(BasePolicy):
         action_space: spaces.Discrete,
         features_extractor: BaseFeaturesExtractor,
         features_dim: int,
-        net_arch: Optional[List[int]] = None,
+        net_arch: Union[List[int], Dict] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
     ) -> None:

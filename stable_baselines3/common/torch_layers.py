@@ -105,11 +105,18 @@ class NatureCNN(BaseFeaturesExtractor):
     def forward(self, observations: th.Tensor) -> th.Tensor:
         return self.linear(self.cnn(observations))
 
+class ResBlock(nn.Module):
+    def __init__(self, module) -> None:
+        super().__init__()
+        self.module = module
+
+    def forward(self, inputs):
+        return self.module(inputs) + inputs
 
 def create_mlp(
     input_dim: int,
     output_dim: int,
-    net_arch: List[int],
+    net_arch: Union[List[int], Dict],
     activation_fn: Type[nn.Module] = nn.ReLU,
     squash_output: bool = False,
     with_bias: bool = True,
@@ -130,6 +137,36 @@ def create_mlp(
     :param with_bias: If set to False, the layers will not learn an additive bias
     :return:
     """
+
+    if isinstance(net_arch, Dict):
+        # making resnet inspired instead
+        # TODO abort if not right elements in dict
+        # res-block must start and end in same size
+        block_arc = net_arch["res-block"].copy()
+        # add first as out last to guarrantee match
+        block_arc.append(block_arc[0])
+        if len(block_arc) > 0: # unsure if I should ommit the activation function here
+            modules = [nn.Linear(input_dim, block_arc[0], bias=with_bias),
+                       activation_fn()]
+        else:
+            modules = []
+
+        for idx in range(net_arch["num_blocks"]):
+            # modules.append(nn.Linear(net_arch[idx], net_arch[idx + 1], bias=with_bias))
+            # modules.append(activation_fn())
+            block_seq = []
+            for b_id in range(len(block_arc)-1):
+                block_seq.append(nn.Linear(block_arc[b_id], block_arc[b_id + 1], bias=with_bias))
+                block_seq.append(activation_fn())
+            block = ResBlock(nn.Sequential(*block_seq))
+            modules.append(block)
+
+        if output_dim > 0:
+            last_layer_dim = block_arc[-1] if len(block_arc) > 0 else input_dim
+            modules.append(nn.Linear(last_layer_dim, output_dim, bias=with_bias))
+        if squash_output:
+            modules.append(nn.Tanh())
+        return modules
 
     if len(net_arch) > 0:
         modules = [nn.Linear(input_dim, net_arch[0], bias=with_bias), activation_fn()]
