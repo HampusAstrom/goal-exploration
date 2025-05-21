@@ -1,6 +1,7 @@
 import numpy as np
 import utils
 import matplotlib.pyplot as plt
+import torch as th
 
 from goal_wrapper import FiveXGoalSelection
 
@@ -156,3 +157,38 @@ for comb in combs:
 combs = utils.weight_combinations(weights, 1)
 
 print(combs)
+
+for i in range(10):
+    print(np.random.rand(2))
+
+
+visits = np.array([0, 1, 5, 100, 1000])
+svisits = sum(visits)
+visits = visits/svisits
+
+inv = 1/visits
+inv_log = 1/np.log(visits)
+inv_log_outer = np.log(1/visits)
+
+softmin = th.nn.Softmin(visits)
+softmax = th.nn.Softmax(visits)
+
+smin = np.exp(-visits)
+smin_n = smin/np.sum(smin)
+
+print(inv)
+print(inv_log)
+print(inv_log_outer)
+print(softmin)
+print(softmax)
+print(smin)
+print(smin_n)
+print(sum(smin_n))
+
+print()
+print(visits)
+print(np.nonzero(visits))
+print(visits[np.nonzero(visits)])
+
+for index in np.ndindex((3, 3, 3)):
+    print(index)
