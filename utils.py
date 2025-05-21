@@ -218,8 +218,8 @@ def plot_all_in_folder(dir,
                        ):
 
     # TODO replace with something that adaps to number of configurations
-    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink']) *
-                           cycler('linestyle', ['-', ':', '--', '-.']))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
+                           cycler('linestyle', ['-', ':', ]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
 
     plt.rc('axes', titlesize=20)     # fontsize of the axes title
     plt.rc('axes', labelsize=28)    # fontsize of the x and y labels
@@ -228,7 +228,7 @@ def plot_all_in_folder(dir,
 
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
-    window = 200
+    window = 50
 
     # get all experiments
     folders = get_all_folders(dir)
