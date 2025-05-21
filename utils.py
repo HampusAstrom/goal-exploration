@@ -149,7 +149,7 @@ def collect_datas(experiments, eval_type="eval_logs"):
 
     return means, values
 
-def add_subplot(path, window, ax, eval_type="eval_logs", name=None):
+def add_subplot(path, window, ax, eval_type="eval_logs", name=None, cutoff=None):
     experiments = get_all_folders(path)
     means, values = collect_datas(experiments, eval_type=eval_type)
     if means is None:
@@ -213,7 +213,9 @@ def plot_all_in_folder(dir,
                        filter=None,
                        name_override=None,
                        eval_type="eval_logs",
-                       goal_plots=False):
+                       goal_plots=False,
+                       cutoff=None,
+                       ):
 
     # TODO replace with something that adaps to number of configurations
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink']) *
@@ -260,7 +262,10 @@ def plot_all_in_folder(dir,
         else:
             add_subplot(folder, window, ax, eval_type=eval_type)
 
-    ax.legend(loc='upper left',
+    if cutoff is not None:
+        ax.set_xlim([0, cutoff])
+
+    ax.legend(loc='lower right', # loc='upper left',
               prop={'size': 8}, # 8
               fancybox=True,
               framealpha=0.2)#, bbox_to_anchor=(1, 0.5))
@@ -323,10 +328,12 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--filter', nargs='*', default=[])
     parser.add_argument('-n', '--name_override', nargs='*', default=None)
     parser.add_argument('-g', '--goal_plots', action='store_true')
+    parser.add_argument('-c', '--cutoff', type=int, default=None)
     args = parser.parse_args()
 
     #folder, coord_names = "./output/wrapper/SparsePendulumEnv-v1", ["x", "y", "ang. vel."],
-    folder, coord_names = "./output/wrapper/PathologicalMountainCar-v1.1", ["xpos", "velocity"],
+    #folder, coord_names = "./output/wrapper/PathologicalMountainCar-v1.1", ["xpos", "velocity"],
+    folder, coord_names = "./output/wrapper/FrozenLake-v1", ["index"], # TODO replace with grid reshape
 
     #plot_all_in_folder("./output/wrapper/SparsePendulumEnv-v1", coord_names = ["x", "y", "ang. vel."],
     #plot_all_in_folder("./output/wrapper/PathologicalMountainCar-v1.1", coord_names = ["xpos", "velocity"],
@@ -337,6 +344,7 @@ if __name__ == '__main__':
                        filter=args.filter,
                        name_override=args.name_override,
                        eval_type="eval_logs",
+                       cutoff=args.cutoff,
                        )
     plot_all_in_folder(folder,
                        coord_names = coord_names,
@@ -345,6 +353,7 @@ if __name__ == '__main__':
                        filter=args.filter,
                        name_override=args.name_override,
                        eval_type="eval_logsfew",
+                       cutoff=args.cutoff,
                        )
     plot_all_in_folder(folder,
                        coord_names = coord_names,
@@ -354,4 +363,5 @@ if __name__ == '__main__':
                        name_override=args.name_override,
                        eval_type="eval_logsmany",
                        goal_plots=args.goal_plots,
+                       cutoff=args.cutoff,
                        )
