@@ -58,10 +58,14 @@ class GoalWrapper(
         elif reward_func == "local-reselect":
             self.goal_reward = self.reselecting_binary_norm_reward
             self.local_reselect = True
+        elif reward_func == "exact_goal_match_reward":
+            self.goal_reward = self.exact_goal_match_reward
+            self.local_reselect = False
         else:
             self.goal_reward = reward_func
 
-        self.obs_scale = self.get_obs_norm()
+        if not reward_func == "exact_goal_match_reward":
+            self.obs_scale = self.get_obs_norm()
 
         self.selection_strategies = None
         self.strat_weights = None
@@ -161,6 +165,8 @@ class GoalWrapper(
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
         er = np.array([dct["extrinsic_reward"] for dct in info])
+        if er.ndim == 1:
+            er = er[...,np.newaxis]
         return gw*goal_reward + (1-gw)*er
 
     def set_goal_strategies(self,
@@ -205,6 +211,23 @@ class GoalWrapper(
 
         return strat(obs)
 
+    def exact_goal_match_reward(self,
+                                achieved_goal,
+                                desired_goal,
+                                info,
+                                ):
+        term = True
+        success = (achieved_goal==desired_goal)
+        ret = success * 1
+        if term:
+            terminate = success
+        else:
+            terminate = np.full_like(success, False)
+        if not isinstance(success, np.ndarray) and success: # this should only happen during rollout, not duing hindsight TODO
+            self.successful_goals.append(self.goal)
+            self.successful_goal_index.append(len(self.targeted_goals)-1)
+        return ret, terminate, success
+
     def flatten_norm_reward(self,
                        achieved_goal,
                        desired_goal,
@@ -216,7 +239,7 @@ class GoalWrapper(
         # especially by normalizing it by the size of each obs space component
         flat_achi = flatten(self.env.observation_space, achieved_goal)
         flat_goal = flatten(self.env.observation_space, desired_goal)
-        if achieved_goal.ndim == 2: # handle batch
+        if isinstance(achieved_goal, np.ndarray) and achieved_goal.ndim == 2: # handle batch
             flat_achi = flat_achi.reshape(-1, self.goal_dim)
             flat_goal = flat_goal.reshape(-1, self.goal_dim)
         distance = np.linalg.norm(flat_achi - flat_goal, axis=-1)
@@ -565,14 +588,21 @@ class GridNoveltySelection():
         # TODO version for int to scale grid, and version with array describing
         # size of grid in each direction
 
-        dims = gym.spaces.utils.flatdim(self.env.observation_space["observation"])
-        self.high = self.env.observation_space["observation"].high
-        self.low = self.env.observation_space["observation"].low
+        if isinstance(self.env.observation_space["observation"], gym.spaces.Discrete):
+            self.discrete_obs = True
+            dims = gym.spaces.utils.flatdim(self.env.observation_space["observation"])
+            # ignore size input for discrete for now, just use full discrete
+            self.shape = [dims] # might be wrong if "multi-dim" discrete
+        else:
+            self.discrete_obs = False
+            dims = gym.spaces.utils.flatdim(self.env.observation_space["observation"])
+            self.high = self.env.observation_space["observation"].high
+            self.low = self.env.observation_space["observation"].low
 
-        # TODO handle if this needs flattening
-        self.shape = [int(size**(1/dims))]*dims
-        # TODO handle non-closed dims
-        self.cell_size = (self.high-self.low)/self.shape
+            # TODO handle if this needs flattening
+            self.shape = [int(size**(1/dims))]*dims
+            # TODO handle non-closed dims
+            self.cell_size = (self.high-self.low)/self.shape
 
         # grids tracking seen obs
         self.visits = np.zeros(shape=self.shape, dtype=int)
@@ -609,7 +639,10 @@ class GridNoveltySelection():
 
         if True: #or self.curr_step < 0.7*self.train_steps:# or np.random.rand() < 0.5:
             cell = self.weighted_novelty_select()
-            goal = self.sample_in_cell(cell)
+            if self.discrete_obs:
+                goal = cell
+            else:
+                goal = self.sample_in_cell(cell)
         else:
             #goal = np.array([-1.65, -0.02,])
             goal = np.array([-1.65, -0.02,])
@@ -653,6 +686,8 @@ class GridNoveltySelection():
         # if no data yet, select random cell
         if self.curr_step <= 0:
             point = self.env.unwrapped.observation_space.sample()
+            if self.discrete_obs:
+                return point
             return self.point2cell(point)
 
         # create novelty weight of cells
@@ -666,6 +701,8 @@ class GridNoveltySelection():
 
         # flatten weights and select flattened index with weighted choice
         ind = np.random.choice(self.visits.size, p=weight_normed.flatten())
+        if self.discrete_obs:
+            return ind
         cell = np.unravel_index(ind, self.visits.shape)
         return cell
 
@@ -673,7 +710,10 @@ class GridNoveltySelection():
     def on_step(self, obs, success):
         # TODO should this be called on reset() too?
         self.curr_step += 1
-        cell = self.point2cell(obs)
+        if self.discrete_obs:
+            cell = obs # do I need to do one-hot conversion here?
+        else:
+            cell = self.point2cell(obs)
         self.visits[cell] += 1
         self.last_visit[cell] = self.curr_step
 
@@ -686,11 +726,13 @@ class GridNoveltySelection():
 
     def sample_in_cell(self, cell):
         # select a goal in this cell
+        # not used with discrete obs
         rand = np.random.rand(len(self.shape))
         return self.low + (cell+rand)*self.cell_size
 
     def point2cell(self, obs):
         # obs = obs["observation"]
+        # not used with discrete obs
         cell = tuple(np.floor((obs-self.low)/self.cell_size).astype(int))
         # TODO replace with nicer solution
         ret = list(cell)
