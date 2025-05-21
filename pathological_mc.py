@@ -50,8 +50,6 @@ class PathologicalMountainCarEnv(MountainCarEnv):
         velocity = np.clip(velocity, -self.max_speed, self.max_speed)
         position += velocity
         position = np.clip(position, self.min_position, self.max_position)
-        if position == self.min_position and velocity < 0:
-            velocity = 0
 
         self.counter += 1
 
