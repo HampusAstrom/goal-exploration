@@ -250,7 +250,8 @@ def plot_all_in_folder(dir,
     folders_end = []
     for i, str in enumerate(folders):
         if ("base-rl" in str):
-            folders_end.append(folders.pop(i))
+            folders_end.append(folders[i])
+    folders = [x for x in folders if x not in folders_end]
     folders += folders_end
 
     for i, folder in enumerate(folders):
