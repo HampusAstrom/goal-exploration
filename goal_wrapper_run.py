@@ -265,18 +265,20 @@ def train(base_path: str = "./data/wrapper/",
         algo = DQNwithICM
         if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
-
-    # def setup_eval(self,
-    #                base_path,
-    #                options,
-    #                experiment,
-    #                env_id,
-    #                env_params,
-    #                eval_seed,
-    #                baseline_override,
-    #                goal_range,
-    #                fixed_goal):
-    #     pass
+    elif env_id == "FrozenLake-v1":
+        # TODO make and shift when running with 8x8
+        fixed_goal = lambda obs: np.array([15])
+        few_goals = [fixed_goal,
+                     lambda obs: np.array([4])]
+        many_goals = few_goals.copy()
+        many_goals += [lambda obs: np.array([12]),
+                       lambda obs: np.array([7]),
+                       lambda obs: np.array([8])]
+        coord_names = ["xpos", "velocity"]
+        # algo = DQN
+        algo = DQNwithICM
+        if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
+            algo = DQN
 
     def setup_eval(eval_type):
         # Create log dir where evaluation results will be saved
@@ -321,7 +323,7 @@ def train(base_path: str = "./data/wrapper/",
                                 goal_weight=goal_weight,
                                 goal_range=goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func="term")
+                                reward_func=reward_func) # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
         else:
             eval_env_goal = eval_env # TODO handle that this name becomes missleading
         eval_env = Monitor(eval_env_goal, eval_log_dir)
@@ -368,7 +370,8 @@ def train(base_path: str = "./data/wrapper/",
                        "replay_buffer_kwargs": dict(
                        n_sampled_goal=n_sampled_goal,
                        goal_selection_strategy="future",
-                       copy_info_dict=True,), # TODO Turn off if not needed
+                       copy_info_dict=True, # TODO Turn off if not needed
+                       terminate_at_goal=True), # TODO make dependant on goal eval strat
                        }
     else:
         policy = "MlpPolicy"
@@ -531,6 +534,10 @@ def train(base_path: str = "./data/wrapper/",
             fp.write('eval_logs 5\n')
             fp.write('eval_logsfew 2\n')
             fp.write('eval_logsmany 5\n')
+        elif env_id == "FrozenLake-v1":
+            fp.write('eval_logs 5\n')
+            fp.write('eval_logsfew 2\n')
+            fp.write('eval_logsmany 5\n')
 
 #model.load(model_path, eval_env)
 
@@ -624,12 +631,13 @@ if __name__ == '__main__':
                             "escalate_exploit": [True],
                             "norm_comps": [True],
                             }
-    env_params = {#"harder_start": [0.1],
-                  "terminate": [True]
+    env_params = {#"harder_start": [0.1], # pendulum
+                  #"terminate": [True] # patho mc
+                  "is_slippery": [True]
                   }
 
     params_to_permute = {"experiments": [1],
-                         "env_id": ["PathologicalMountainCar-v1.1",], # "PathologicalMountainCar-v1" # "SparsePendulumEnv-v1" # "Pendulum-v1" "MountainCarContinuous-v0"
+                         "env_id": ["FrozenLake-v1",], # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
                          "steps": [500000],
@@ -637,7 +645,7 @@ if __name__ == '__main__':
                          "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
-                         "reward_func": ["reselect"], # "term", "reselect", "local-reselect" # only applies to train, eval terms
+                         "reward_func": ["exact_goal_match_reward"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
                          "buffer_size": [1000000],
                          "baseline_override": ["grid-novelty"], # [None] #["base-rl", "uniform-goal", "grid-novelty"]  # should be if not doing baseline None
                          }
