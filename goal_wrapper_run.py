@@ -476,38 +476,42 @@ def train(base_path: str = "./data/wrapper/",
 
     if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         targeted_goals = np.stack(train_env_goal.targeted_goals)
-        utils.plot_targeted_goals(targeted_goals,
-                                coord_names,
-                                os.path.join(base_path, options, experiment))
-        np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
         initial_targeted_goals = np.stack(train_env_goal.initial_targeted_goals)
-        utils.plot_targeted_goals(initial_targeted_goals,
-                                coord_names,
-                                os.path.join(base_path, options, experiment),
-                                figname="ep_start_goal_spread")
+        successful_goals = np.stack(train_env_goal.successful_goals)
+        successful_goal_index = np.stack(train_env_goal.successful_goal_index)
+        np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
         np.savetxt(os.path.join(base_path, options, experiment,"initial_targeted_goals"), initial_targeted_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_index"), successful_goal_index)
+
         if len(train_env_goal.local_targeted_goals) > 0:
             local_targeted_goals = np.stack(train_env_goal.local_targeted_goals)
-            utils.plot_targeted_goals(local_targeted_goals,
+            np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
+
+        if len(targeted_goals.shape) > 1: # requires goals tracked in more than one dim to plot this way
+            utils.plot_targeted_goals(targeted_goals,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment))
+            utils.plot_targeted_goals(initial_targeted_goals,
                                     coord_names,
                                     os.path.join(base_path, options, experiment),
-                                    figname="reselect_goal_spread")
-            np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
-        successful_goals = np.stack(train_env_goal.successful_goals)
-        utils.plot_targeted_goals(successful_goals,
-                                coord_names,
-                                os.path.join(base_path, options, experiment),
-                                figname="successful_goal_spread")
-        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
-        successful_goal_index = np.stack(train_env_goal.successful_goal_index)
-        # TODO make plot for goal success over time, maybe also shift color in plot above by time
-        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_index"), successful_goal_index)
+                                    figname="ep_start_goal_spread")
+            if len(train_env_goal.local_targeted_goals) > 0:
+                utils.plot_targeted_goals(local_targeted_goals,
+                                        coord_names,
+                                        os.path.join(base_path, options, experiment),
+                                        figname="reselect_goal_spread")
+            utils.plot_targeted_goals(successful_goals,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment),
+                                    figname="successful_goal_spread")
 
     if baseline_override in ["grid-novelty"]:
         np.savetxt(os.path.join(base_path, options, experiment,"n_shape"),
                    goal_selection.shape)
-        np.savetxt(os.path.join(base_path, options, experiment,"n_cell_size"),
-                   goal_selection.cell_size)
+        if hasattr(goal_selection, "cell_size"):
+            np.savetxt(os.path.join(base_path, options, experiment,"n_cell_size"),
+                    goal_selection.cell_size)
         np.savetxt(os.path.join(base_path, options, experiment,"n_visits"),
                    goal_selection.visits)
         np.savetxt(os.path.join(base_path, options, experiment,"n_last_visit"),
