@@ -2,8 +2,8 @@ import gymnasium as gym
 import numpy as np
 
 def predict(obs):
-    oracle = [ 0,  2,  0,  3, # third value 0 or 3?
-               0, -1,  0, -1,
+    oracle = [ 0,  3,  0,  3, # third value 0 or 3?
+               0, -1,  2, -1,
                3,  1,  0, -1,
               -1,  2,  1, -1]
     return oracle[obs]
@@ -51,3 +51,5 @@ print(f"Failure %:  {successes/n_exps}")
 # Term %:      0.952619
 # Failure %:   0.259872
 # Failure %:  0.692747
+
+# Apparently ideal should be 0.74

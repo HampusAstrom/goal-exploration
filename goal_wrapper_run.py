@@ -21,7 +21,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 import time
 import yappi
 
-from goal_wrapper import GoalWrapper, FiveXGoalSelection, OrderedGoalSelection, GridNoveltySelection
+from goal_wrapper import GoalWrapper, FiveXGoalSelection, OrderedGoalSelection, GridNoveltySelection, FixedGoalSelection
 
 from sparse_pendulum import SparsePendulumEnv
 from pathological_mc import PathologicalMountainCarEnv
@@ -132,6 +132,14 @@ def train(base_path: str = "./data/wrapper/",
     n_training_envs = 1
     n_eval_envs = 5
 
+    if env_id == "PathologicalMountainCar-v1.1" or \
+        env_id == "CliffWalking-v0":
+        eval_freq = 50000 #50000 for patho MC and Cliffwalk (high freq 10000), 10000 frozen
+    elif env_id == "FrozenLake-v1":
+        eval_freq = 10000
+    else:
+        raise "Error, set eval_freq for this env"
+
     # Create 4 artificial transitions per real transition
     n_sampled_goal = 4
 
@@ -145,11 +153,11 @@ def train(base_path: str = "./data/wrapper/",
                 + str(goal_range) + "goal_range_" \
                 + str(reward_func) + "-reward_func" \
 
-    if baseline_override is None:
+    if baseline_override in [None, "grid-novelty"]:
         for key, val in goal_selection_params.items():
             if type(val) is list:
                 options += "_[" + ",".join(str(v) for v in val) + "]" + key
-            elif val == True:
+            elif val is True:
                 options += "_" + key
             else:
                 options += "_" + str(val) + key
@@ -165,6 +173,17 @@ def train(base_path: str = "./data/wrapper/",
 
     if buffer_size != int(1e6): # if not default
         options += "_" + str(buffer_size) + "buffer_size"
+
+    # TODO hard coded options addition
+    #options += "_256-256-256-256-256net"
+    #options += "_finetune_at0.7_1.0of_time"#"_no_hindsight_then"
+    #options += "_gradually_reduce_hindsight_from_0.8_to_0"
+    #options += "_her_episode_gradually_reduce_hindsight_from_0.8_to_0"
+    #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net"
+    #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net_exploration_fraction0.5_more_novelty_focus"
+    options += "_batch_size512_train_freq512_lr_1e-3_3x256net"#_more_novelty_focus"
+
+    print(options)
 
     # check existing experiments
     exp_paths = utils.get_all_folders(os.path.join(base_path, options))
@@ -199,7 +218,8 @@ def train(base_path: str = "./data/wrapper/",
     os.makedirs(log_dir, exist_ok=True)
 
     # save config file in folder to keep track of parameters used
-    signature = inspect.signature(FiveXGoalSelection)
+    #signature = inspect.signature(FiveXGoalSelection)
+    signature = inspect.signature(GridNoveltySelection)
     default_goal_selection_params = {k: v.default
                                      for k, v in signature.parameters.items()
                                      if v.default is not inspect.Parameter.empty}
@@ -253,13 +273,26 @@ def train(base_path: str = "./data/wrapper/",
         if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
-        fixed_goal = lambda obs: np.array([-1.65, -0.02,])
+        fixed_goal = lambda obs: np.array([-1.60, 0.00,])
         few_goals = [fixed_goal,
-                     lambda obs: np.array([0.55, 0.02,])]
+                     lambda obs: np.array([0.5, 0.00,])]
         many_goals = few_goals.copy()
         many_goals += [lambda obs: np.array([-0.5, 0.04,]),
                        lambda obs: np.array([-0.5, -0.04,]),
                        lambda obs: np.array([-0.7, 0.0,])]
+        max_goals = [[-1.60, 0.00,],
+                     [0.5, 0.00,],
+                     [-0.5, 0.04,],
+                     [-0.5, -0.04,],
+                     [-0.7, 0.0,],
+                     [0.0, 0.0,],
+                     [-1.1, 0.0,],
+                     [-1.1, 0.03,],
+                     [-1.1, -0.05,],
+                     [0.3, 0.0],
+                     [0.3, 0.05],
+                     [0.3, -0.02],
+                     ]
         coord_names = ["xpos", "velocity"]
         # algo = DQN
         algo = DQNwithICM
@@ -274,11 +307,61 @@ def train(base_path: str = "./data/wrapper/",
         many_goals += [lambda obs: np.array([12]),
                        lambda obs: np.array([7]),
                        lambda obs: np.array([8])]
-        coord_names = ["xpos", "velocity"]
+        max_goals = [i for i in range(16)]
+        coord_names = ["index"]
         # algo = DQN
         algo = DQNwithICM
         if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
+    elif env_id == "CliffWalking-v0":
+        # TODO make and shift when running with 8x8
+        fixed_goal = lambda obs: np.array([47])
+        few_goals = [fixed_goal,
+                     lambda obs: np.array([4])]
+        many_goals = few_goals.copy()
+        many_goals += [lambda obs: np.array([12]),
+                       lambda obs: np.array([7]),
+                       lambda obs: np.array([8])]
+        max_goals = [i for i in range(48)] # TODO grab from env obs space instead
+        coord_names = ["index"]
+        # algo = DQN
+        algo = DQNwithICM
+        if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
+            algo = DQN
+
+    def setup_evalcallbacks_from_goal_list(goals, freq=eval_freq, n_eval_episodes=1):
+
+        eval_callback_list = []
+        for goal in goals:
+            eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs_" + str(goal))
+            os.makedirs(eval_log_dir, exist_ok=True)
+
+            eval_env = gym.make(env_id, **env_params)
+            if eval_seed is not None:
+                eval_env.reset(seed=eval_seed)
+            goal_selector = FixedGoalSelection(goal)
+            goal_selection = goal_selector.select_goal
+            goal_weight=1
+
+            eval_env_goal = GoalWrapper(eval_env,
+                                goal_weight=goal_weight,
+                                goal_range=goal_range,
+                                goal_selection_strategies=goal_selection,
+                                reward_func=reward_func) # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
+            eval_env = Monitor(eval_env_goal, eval_log_dir)
+
+            eval_callback = EvalCallback(eval_env,
+                                    best_model_save_path=eval_log_dir,
+                                    log_path=eval_log_dir,
+                                    eval_freq=max(freq // n_training_envs, 1),
+                                    n_eval_episodes=n_eval_episodes,
+                                    deterministic=True,
+                                    render=False,
+                                    verbose=verbose,
+                                    seed=eval_seed)
+            eval_callback_list.append(eval_callback)
+        return eval_callback_list
+
 
     def setup_eval(eval_type):
         # Create log dir where evaluation results will be saved
@@ -336,7 +419,7 @@ def train(base_path: str = "./data/wrapper/",
         eval_callback = EvalCallback(eval_env,
                                     best_model_save_path=eval_log_dir,
                                     log_path=eval_log_dir,
-                                    eval_freq=max(2000 // n_training_envs, 1),
+                                    eval_freq=max(eval_freq // n_training_envs, 1),
                                     n_eval_episodes=n_eval_episodes,
                                     deterministic=True,
                                     render=False,
@@ -347,15 +430,19 @@ def train(base_path: str = "./data/wrapper/",
 
     eval_callback = setup_eval("fixed")
     # TODO replace all these checks with non-listed logic
-    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
+    if baseline_override != "base-rl" and True:
+        clist = setup_evalcallbacks_from_goal_list(max_goals)
+        clist.append(eval_callback)
+        eval_callbacks = clist
+    elif baseline_override in [None, "uniform-goal", "grid-novelty"]:
         eval_callback_few = setup_eval("few")
         eval_callback_many = setup_eval("many")
-        eval_callbacks = CallbackList([eval_callback,
-                                       eval_callback_few,
-                                       eval_callback_many])
+        eval_callbacks = [eval_callback,
+                          eval_callback_few,
+                          eval_callback_many]
         # TODO this is a bit inefficient, we could gain speed
     else:
-        eval_callbacks = CallbackList([eval_callback])
+        eval_callbacks = [eval_callback]
 
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
     os.makedirs(eval_log_dir, exist_ok=True)
@@ -373,6 +460,8 @@ def train(base_path: str = "./data/wrapper/",
                        copy_info_dict=True, # TODO Turn off if not needed
                        terminate_at_goal=True), # TODO make dependant on goal eval strat
                        }
+        # if env_id == "CliffWalking-v0":
+        #     algo_kwargs["replay_buffer_kwargs"]["handle_timeout_termination"] = True
     else:
         policy = "MlpPolicy"
         algo_kwargs = {}
@@ -387,26 +476,27 @@ def train(base_path: str = "./data/wrapper/",
                 buffer_size=buffer_size,
                 learning_rate=1e-3,
                 gamma=0.95,
-                batch_size=512, # TODO change train_freq to match
-                #train_freq=512,
+                batch_size=512,
+                train_freq=512,
+                #exploration_fraction=1.0,
+                #target_update_interval=1000,
+                #gradient_steps=-1,
                 policy_kwargs=dict(net_arch=[256, 256, 256],),
                 #policy_kwargs=dict(net_arch=[64, 64],),
                 #policy_kwargs=dict(net_arch=[256, 256, 256, 256, 256, 256, 256, 256, 256],),
-                #policy_kwargs=dict(net_arch={"res-block": [256, 256], "num_blocks": 3},),
+                #policy_kwargs=dict(net_arch={"res-block": [256, 256, 256, 256], "num_blocks": 4},),
                 seed=policy_seed,
                 device=device,
                 tensorboard_log=log_dir,
     )
 
     #model.replay_buffer.her_ratio = 0
-    callback_list = eval_callbacks.callbacks
-    # callback_list.append(ChangeParamCallback(total_steps=steps,
+    # eval_callbacks.append(ChangeParamCallback(total_steps=steps,
     #                                          object=model,
     #                                          val_name_chain=["replay_buffer", "her_ratio"],
     #                                          start_val=0.8,
     #                                          end_val=0,
     #                                          change_fraction=None))
-    eval_callbacks = CallbackList(callback_list)
 
     if baseline_override is None:
         # TODO a smart goal selection needs access to buffer of seen states and of targeted goals
@@ -453,7 +543,7 @@ def train(base_path: str = "./data/wrapper/",
         callback = eval_callbacks
         goal_selection = GridNoveltySelection(train_env_goal,
                                               train_steps=steps,
-                                              size=10000 # leave for goal_selection_params later
+                                              **goal_selection_params,
                                               )
         goal_selection_strategies = [goal_selection.select_goal, fixed_goal]
         goal_sel_strat_weight = [1-fixed_goal_fraction, fixed_goal_fraction]
@@ -467,7 +557,7 @@ def train(base_path: str = "./data/wrapper/",
     print(model.policy)
 
     start_time = time.time()
-    model.learn(steps, callback=callback, progress_bar=True)
+    model.learn(steps, callback=CallbackList(callback), progress_bar=True)
     time_used = time.time() - start_time
     print("--- %s seconds ---" % (time_used))
     #model.learn(steps, progress_bar=True)
@@ -540,8 +630,8 @@ def train(base_path: str = "./data/wrapper/",
             fp.write('eval_logsmany 5\n')
         elif env_id == "FrozenLake-v1":
             fp.write('eval_logs 5\n')
-            fp.write('eval_logsfew 2\n')
-            fp.write('eval_logsmany 5\n')
+        elif env_id == "CliffWalking-v0":
+            fp.write('eval_logs 5\n')
 
 #model.load(model_path, eval_env)
 
@@ -616,45 +706,72 @@ if __name__ == '__main__':
     temp = utils.weight_combinations(weights, 1)
     temp.append([1, 1, 1, 1, 1])
 
-    goal_conf_to_permute = {"exploit_dist": [0.2,],
-                            "expand_dist": [0.01,],
-                            "component_weights": [#[1, 1, 0, 0, 0], # try? [1, 0, 0, 5, 0], or so
-                                                #   [1, 0, 1, 0, 0],
-                                                #   [1, 0, 0, 1, 0],
-                                                #   [1, 0, 0, 0, 1],
-                                                #   [0, 1, 1, 0, 0],
-                                                  [0, 1, 0, 1, 0],
-                                                #   [0, 1, 0, 0, 1],
-                                                #   [0, 0, 1, 1, 0],
-                                                #   [0, 0, 1, 0, 1],
-                                                #   [0, 0, 0, 1, 1],
-                                                 ],
-                            # "component_weights": utils.weight_combinations(weights, 2),
-                            # "component_weights": temp,
-                            "steps_halflife": [500,],
-                            "escalate_exploit": [True],
-                            "norm_comps": [True],
+    # goal_conf_to_permute = {"exploit_dist": [0.2,],
+    #                         "expand_dist": [0.01,],
+    #                         "component_weights": [[0, 0, 0, 0, 1],
+    #                                             #   [1, 1, 1, 1, 0],
+    #                                             #   [0, 1, 1, 1, 0],
+    #                                             #   [1, 1, 0, 1, 0],
+    #                                             #   [1, 0, 0, 1, 0],
+    #                                             #   [1, 1, 0, 1, 0],
+    #                                             #   [0, 0, 0, 1, 0],
+    #                                             #   [1, 0, 0, 0, 1],
+    #                                             #   [1, 0, 0, 1, 0],
+    #                                             #   [0, 0, 0, 1, 1],
+    #                                             #   [1, 0, 0, 0, 0],
+    #                                             #   [0, 0, 0, 0, 1],
+    #                                              ],
+    #                         # "component_weights": utils.weight_combinations(weights, 2),
+    #                         # "component_weights": temp,
+    #                         "steps_halflife": [500,],
+    #                         "escalate_exploit": [True],
+    #                         "norm_comps": [True],
+    #                         }
+    goal_conf_to_permute = {"grid_size": [10000],
+                            "fraction_random": [0.1],
+                            #"target_success_rate": [0.75],
+                            "dist_decay": [2],
                             }
-    env_params = {#"harder_start": [0.1], # pendulum
-                  #"terminate": [True] # patho mc
-                  "is_slippery": [True]
-                  }
 
-    params_to_permute = {"experiments": [1],
-                         "env_id": ["FrozenLake-v1",], # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    pend_env_params = {"harder_start": [0.1]}
+    pathmc_env_params = {"terminate": [True]}
+    frozen_env_params = {"is_slippery": [True]}
+    cliffwalker_env_params = {"max_episode_steps": [300]} # override to play nice with HER #{"is_slippery": [False]}
+
+    env_id = "FrozenLake-v1" # "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    # TODO get updated gym envs with cliffwalking v1
+
+    if env_id == "SparsePendulumEnv-v1":
+        env_params = pend_env_params
+    elif env_id == "PathologicalMountainCar-v1.1":
+        env_params = pathmc_env_params
+    elif env_id == "FrozenLake-v1":
+        env_params = frozen_env_params
+    elif env_id == "CliffWalking-v0":
+        env_params = cliffwalker_env_params
+    else:
+        print("env without env params?")
+        exit()
+    # env_params = {#"harder_start": [0.1], # pendulum
+    #               "terminate": [True] # patho mc
+    #               #"is_slippery": [True]
+    #               }
+
+    params_to_permute = {"experiments": [4],
+                         "env_id": [env_id],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
-                         "steps": [500000],
+                         "steps": [1000000],
                          "goal_weight": [1.0],
                          "goal_range": [0.1],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
                          "reward_func": ["exact_goal_match_reward"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
                          "buffer_size": [1000000],
-                         "baseline_override": ["grid-novelty"], # [None] #["base-rl", "uniform-goal", "grid-novelty"]  # should be if not doing baseline None
+                         "baseline_override": ["grid-novelty"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
                          }
 
-    base_path = "./temp/wrapper/"
+    base_path = "./output/wrapper/"
 
     experiment_list = named_permutations(params_to_permute)
 
@@ -698,7 +815,7 @@ if __name__ == '__main__':
 
     if profile:
         yappi.stop()
-        yappi.get_func_stats().save("./test3.pstats",type="pstat")
+        yappi.get_func_stats().save("./profile1milStep_10kBuffer.pstats",type="pstat")
 
     # for conf in product(fixed_goal_fractions, experiments):
     #     print("Training with configuration: " + str(conf))

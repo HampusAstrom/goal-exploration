@@ -128,7 +128,7 @@ class GoalWrapper(
         if self.goal_selector_obj is not None:
             on_step = getattr(self.goal_selector_obj, "on_step", None)
             if callable(on_step):
-                on_step(obs, success) # TODO maybe pass all possible info any could use?
+                on_step(obs, success, self.goal) # TODO maybe pass all possible info any could use?
 
         return self._get_obs(obs), totreward, terminated, truncated, info
 
@@ -165,8 +165,7 @@ class GoalWrapper(
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
         er = np.array([dct["extrinsic_reward"] for dct in info])
-        if er.ndim == 1:
-            er = er[...,np.newaxis]
+        goal_reward = goal_reward.flatten() # TODO confirm that this does not break anything in some env
         return gw*goal_reward + (1-gw)*er
 
     def set_goal_strategies(self,
@@ -237,9 +236,15 @@ class GoalWrapper(
         # and check "distance" from goal. For now requires flattenable space
         # in the future it should also be possible to give weights to certain dimensions
         # especially by normalizing it by the size of each obs space component
-        flat_achi = flatten(self.env.observation_space, achieved_goal)
-        flat_goal = flatten(self.env.observation_space, desired_goal)
-        if isinstance(achieved_goal, np.ndarray) and achieved_goal.ndim == 2: # handle batch
+        # normalize
+        low = self.env.observation_space.low
+        high = self.env.observation_space.high
+        achieved_goal_normed = (achieved_goal - low)/(high-low)
+        desired_goal_normed = (desired_goal - low)/(high-low)
+
+        flat_achi = flatten(self.env.observation_space, achieved_goal_normed)
+        flat_goal = flatten(self.env.observation_space, desired_goal_normed)
+        if isinstance(achieved_goal_normed, np.ndarray) and achieved_goal_normed.ndim == 2: # handle batch
             flat_achi = flat_achi.reshape(-1, self.goal_dim)
             flat_goal = flat_goal.reshape(-1, self.goal_dim)
         distance = np.linalg.norm(flat_achi - flat_goal, axis=-1)
@@ -318,6 +323,14 @@ class GoalWrapper(
                 break
 
         return goal
+
+class FixedGoalSelection():
+    def __init__(self,
+                 goal) -> None:
+        self.goal = goal
+
+    def select_goal(self, obs):
+        return self.goal
 
 class FiveXGoalSelection():
     def __init__(self,
@@ -580,11 +593,17 @@ class GridNoveltySelection():
     def __init__(self,
                  env: gym.Env,
                  train_steps,
-                 size, # for now in number of cells, later also by env dim
+                 grid_size, # for now in number of cells, later also by env dim
+                 fraction_random = 0,
+                 target_success_rate = None,
+                 dist_decay = 1,
                  ) -> None:
         self.env = env
         self.train_steps = train_steps
         self.curr_step = 0
+        self.fraction_random = fraction_random
+        self.target_success_rate = target_success_rate
+        self.dist_decay = dist_decay
         # TODO version for int to scale grid, and version with array describing
         # size of grid in each direction
 
@@ -600,7 +619,7 @@ class GridNoveltySelection():
             self.low = self.env.observation_space["observation"].low
 
             # TODO handle if this needs flattening
-            self.shape = [int(size**(1/dims))]*dims
+            self.shape = [int(grid_size**(1/dims))]*dims
             # TODO handle non-closed dims
             self.cell_size = (self.high-self.low)/self.shape
 
@@ -637,16 +656,25 @@ class GridNoveltySelection():
     def select_goal(self, obs):
         # TODO select between methods based on initialized selection/probabilities
 
-        if True: #or self.curr_step < 0.7*self.train_steps:# or np.random.rand() < 0.5:
-            cell = self.weighted_novelty_select()
+        #if True: #or self.curr_step < 0.7*self.train_steps:# or np.random.rand() < 0.5:
+        if np.random.rand() >= self.fraction_random:
+            if self.target_success_rate is not None:
+                cell = self.intermediate_difficulty_select()
+            else:
+                cell = self.weighted_novelty_select()
             if self.discrete_obs:
                 goal = cell
             else:
                 goal = self.sample_in_cell(cell)
         else:
+            goal = self.env.unwrapped.observation_space.sample()
+            if self.discrete_obs:
+                cell = goal
+            else:
+                cell = self.point2cell(goal)
             #goal = np.array([-1.65, -0.02,])
-            goal = np.array([-1.65, -0.02,])
-            cell = self.point2cell(goal)
+            # goal = np.array([-1.65, -0.02,])
+            # cell = self.point2cell(goal)
             #goal = self.sample_in_cell(cell)
         # selecting with weight inverse to cell visitation
         # select lowest only (probably unstable)
@@ -677,7 +705,9 @@ class GridNoveltySelection():
         lowest_cells = np.argwhere(self.visits == lowest_val)
         ind = np.random.choice(len(lowest_cells))
         cell = lowest_cells[ind]
-        return cell
+        if self.discrete_obs:
+            return cell[0]
+        return tuple(list(cell))
 
     def weighted_novelty_select(self):
         # chooses one of the cells that are visited, weighted toward the one
@@ -685,19 +715,26 @@ class GridNoveltySelection():
 
         # if no data yet, select random cell
         if self.curr_step <= 0:
-            point = self.env.unwrapped.observation_space.sample()
-            if self.discrete_obs:
-                return point
-            return self.point2cell(point)
+            return self.initial_select()
 
         # create novelty weight of cells
         # normalize visits to 1
         # calc softmin weight of visits (torch implementation seems bugged)
         # exclude 0 visit cells
         norm_visits = self.visits/self.curr_step
-        weight = np.exp(-norm_visits)
+        #weight = np.exp(-norm_visits) # norm by size too first
+        #weight = np.max(norm_visits)-norm_visits
+        weight = 1/np.power(norm_visits + 0.01, self.dist_decay)
+        if np.sum(weight) >= 0: #avoid risk of crash if all visits even
+            weight += 1
         weight_normed = weight/np.sum(weight[np.nonzero(self.visits)])
         weight_normed[self.visits == 0] = 0
+        if False: # Debug
+            print(np.min(norm_visits[norm_visits > 0]))
+            print(np.max(norm_visits))
+            print(np.min(weight_normed[weight_normed > 0]))
+            print(np.max(weight_normed))
+            print()
 
         # flatten weights and select flattened index with weighted choice
         ind = np.random.choice(self.visits.size, p=weight_normed.flatten())
@@ -706,21 +743,75 @@ class GridNoveltySelection():
         cell = np.unravel_index(ind, self.visits.shape)
         return cell
 
+    def intermediate_difficulty_select(self):
+        if self.target_success_rate is None:
+            raise "Error, intermediate_difficulty_select requires a target success rate"
+        # if no data yet, select random cell
+        if self.curr_step <= 0:
+            return self.initial_select()
 
-    def on_step(self, obs, success):
+        visited = np.sum(self.visits > 0)
+        visited_not_targeted = np.argwhere(np.logical_and(self.visits > 0, self.targeted == 0))
+        frac_visited_not_targeted = len(visited_not_targeted)/visited
+        if np.sum(self.succeded) == 0 or np.random.rand() < frac_visited_not_targeted*0.5:
+            ind = np.random.choice(len(visited_not_targeted))
+            cell = visited_not_targeted[ind]
+            if self.discrete_obs:
+                return cell[0]
+            return tuple(list(cell))
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            success_rate = self.succeded/self.targeted
+
+        if isinstance(self.target_success_rate, float):
+            dist = np.abs(success_rate - self.target_success_rate)
+        else:
+            raise f"Error, bad target_success_rate {self.target_success_rate}"
+
+        # TODO make weighted instead of hard select (as option)
+        # minimum = np.nanmin(dist)
+        # candidates = np.argwhere(np.logical_and(~np.isnan(dist), dist == minimum))
+        # ind = np.random.choice(len(candidates))
+        # cell = candidates[ind]
+
+        weight = 1/np.power(dist + 0.01, self.dist_decay) # TODO make fixed smoothing a variable
+
+        candidates = np.argwhere(~np.isnan(weight))
+        weight = weight[~np.isnan(weight)]
+        weight = weight/np.sum(weight)
+
+        ind = np.random.choice(len(candidates), p=weight.flatten())
+        cell = candidates[ind]
+
+        if self.discrete_obs:
+            return cell[0]
+        return tuple(list(cell)) # TODO this messes with discrete
+
+
+    def initial_select(self):
+        point = self.env.unwrapped.observation_space.sample()
+        if self.discrete_obs:
+            return point
+        return self.point2cell(point)
+
+    def on_step(self, obs, success, goal):
         # TODO should this be called on reset() too?
         self.curr_step += 1
         if self.discrete_obs:
-            cell = obs # do I need to do one-hot conversion here?
+            obs_cell = obs # do I need to do one-hot conversion here?
         else:
-            cell = self.point2cell(obs)
-        self.visits[cell] += 1
-        self.last_visit[cell] = self.curr_step
+            obs_cell = self.point2cell(obs)
+        self.visits[obs_cell] += 1
+        self.last_visit[obs_cell] = self.curr_step
 
         # track goal success here, goal targeting when selecting
         if success:
-            self.succeded[cell] += 1
-            self.latest_succeded[cell] = self.curr_step
+            if self.discrete_obs:
+                goal_cell = goal # do I need to do one-hot conversion here?
+            else:
+                goal_cell = self.point2cell(goal)
+            self.succeded[goal_cell] += 1
+            self.latest_succeded[goal_cell] = self.curr_step
 
         # TODO add success/fail streak update if we track it
 

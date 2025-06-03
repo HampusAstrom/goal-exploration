@@ -44,6 +44,7 @@ class GridPlotter:
                  model,
                  base_env,
                  goal_env,
+                 goal,
                  size=10000,
                  flip_dims = False,
                  flip_y = False,
@@ -52,6 +53,7 @@ class GridPlotter:
         self.model = model
         self.base_env = base_env
         self.goal_env = goal_env
+        self.goal = goal
         self.size = size
         self.flipdim = flip_dims
         self.obs_grid_converter = obs_grid_converter
@@ -110,17 +112,20 @@ class GridPlotter:
         #cell = min(cell, )
         return tuple(ret)
 
-    def get_q_vals(self, goal_s=None):
+    def show_goal_point(self):
+        if self.obs_grid_converter:
+            goal = self.obs_grid_converter(self.goal)
+        else:
+            goal = self.goal
+        plt.scatter(goal[0], goal[1], s=200, color='k', marker='*')
+        plt.scatter(goal[0], goal[1], s=100, color='gold', marker='*')
+
+    def get_q_vals(self, goal):
         #ret = np.zeros(shape=(self.shape), dtype=int)
         # TODO hardcoded version for discrete actionspaces
         ret_shape = self.shape.copy()
         ret_shape.append(self.goal_env.action_space.n)
         ret = np.zeros(shape=ret_shape)
-
-        if goal_s is None:
-            goal = np.array([-1.65, -0.02,]) # hardcoded for patho MC
-        else:
-            goal = np.fromstring(goal_s, dtype=float, sep=' ')
 
         for index in np.ndindex(tuple(self.shape)):
             obs = self.obss[index]
@@ -208,7 +213,7 @@ class GridPlotter:
 
         #x, y = zip(*self.obss.copy().reshape(-1, 2))
         #valrow = vals.reshape(-1, nplots)
-        cmap = mpl.cm.get_cmap("plasma").copy()
+        cmap = mpl.cm.get_cmap("viridis").copy()
         cmap.set_under(color='white')
 
         for p in range(nplots):
@@ -224,26 +229,29 @@ class GridPlotter:
                            self.obss[..., self.second]*self.flip_y,
                            vals[..., p],
                            cmap="viridis")
+            self.show_goal_point()
             ax = fig.add_subplot(subplot_rows, nplots, nplots+p+1)
             # TODO fix colormap scale, especially for segement version, so they match
             plt.pcolormesh(self.obss[..., self.first],
                         self.obss[..., self.second]*self.flip_y,
                         vals[..., p]-medians,
                         cmap="plasma")
-            if segment:
+            self.show_goal_point()
+            if segment and np.max(filtered_over_median[..., p])>np.min(filtered_over_median[..., p]):
                 ax = fig.add_subplot(subplot_rows, nplots, 2*nplots+p+1)
                 plt.pcolormesh(self.obss[..., self.first],
                             self.obss[..., self.second]*self.flip_y,
                             filtered_over_median[..., p],
                             cmap=cmap,
                             vmin=0.0000001)
+            self.show_goal_point()
 
         #plt.show()
 
-    def plot_transitions(self, vals):
+    def plot_transitions(self, q_diffs):
         # TODO names of axes and subfigs
 
-        nplots = vals.shape[-2]
+        nplots = q_diffs.shape[-2]
 
         subplot_rows = 1
 
@@ -258,7 +266,7 @@ class GridPlotter:
 
         #x, y = zip(*self.obss.copy().reshape(-1, 2))
         #valrow = vals.reshape(-1, nplots)
-        cmap = mpl.cm.get_cmap("plasma").copy()
+        cmap = mpl.cm.get_cmap("viridis").copy()
         cmap.set_under(color='white')
 
         if self.obs_grid_converter:
@@ -275,8 +283,8 @@ class GridPlotter:
             ax = fig.add_subplot(subplot_rows, nplots, p+1)
             plt.quiver(self.obss[..., self.first],
                         self.obss[..., self.second]*self.flip_y,
-                        vals[..., p, self.first],
-                        vals[..., p, self.second]*self.flip_y,
+                        q_diffs[..., p, self.first],
+                        q_diffs[..., p, self.second]*self.flip_y,
                         angles='xy',
                         color=color[p])
 
@@ -307,14 +315,6 @@ class GridPlotter:
             color = ["red", "green", "blue"]
 
         for p in range(nplots):
-            # ax = fig.add_subplot(1, nplots, p+1, projection='3d')
-            # surf = ax.plot_surface(self.obss[..., 0],
-            #                        self.obss[..., 1],
-            #                        vals[..., p],
-            #                        cmap="viridis")
-            #ax = fig.add_subplot(subplot_rows, nplots, p+1)
-            # ax.set_xticks([])
-            # ax.set_yticks([])
             plt.quiver(self.obss[..., self.first],
                         self.obss[..., self.second]*self.flip_y,
                         diff[..., p, self.first],
@@ -324,18 +324,9 @@ class GridPlotter:
                         scale=1,
                         color=color[p],
                         alpha=0.9)
-            # plt.scatter(end[..., p, 1],
-            #             end[..., p, 0],
-            #             color=color[p],
-            #             marker='.',
-            #             alpha=0.4)
-            # plt.scatter(self.obss[..., 1],
-            #             self.obss[..., 0],
-            #             color='k',
-            #             marker='.',
-            #             alpha=0.4)
 
         #plt.show()
+
 
     def plot_selected_transitions(self, q_vals, diffs):
         # TODO names of axes and subfigs
@@ -357,7 +348,6 @@ class GridPlotter:
         maxes = np.max(q_vals, -1,keepdims=True)
         sel_ind = np.where(q_vals[:,:,] == maxes)
         max_ind = np.argmax(q_vals, -1, keepdims=True)
-
         plt.quiver(self.obss[..., self.first],
                     self.obss[..., self.second]*self.flip_y,
                     diffs[sel_ind][..., self.first],
@@ -367,6 +357,7 @@ class GridPlotter:
                     scale=1,
                     color=color_grid[sel_ind],
                     alpha=0.9)
+        self.show_goal_point()
 
         #plt.show()
 
@@ -379,7 +370,7 @@ class GridPlotter:
         #"n_shape",
 
         px = 1/plt.rcParams['figure.dpi']
-        #fig = plt.figure(figsize=(1920*px, 1080*px))
+        fig = plt.figure(figsize=(1920*px, 1080*px))
         subplot_rows = int(np.floor(np.sqrt(len(grid_files))))
         nplots = len(grid_files)
         fig, axes = plt.subplots(subplot_rows,
@@ -392,17 +383,21 @@ class GridPlotter:
                 ax.set_xticks([])
                 ax.set_yticks([])
 
-        cmap = mpl.cm.get_cmap("plasma").copy()
+        cmap = mpl.cm.get_cmap("viridis").copy()
         cmap.set_under(color='white')
         for p, measure in enumerate(grid_files):
             path = os.path.join(folder, measure)
 
+            if not os.path.isfile(path):
+                continue
+
             with open(path,'r') as measure_info:
                 reader = csv.reader(measure_info, delimiter=' ')
-                data = np.array([float(i[0]) for i in reader]).reshape(4,4)
-                # x = list(reader)
-                # data = np.array(x).astype("float")
-                #data = np.array([float(i[0]) for i in reader]).reshape(100,100)
+                if self.obs_grid_converter is not None:
+                    data = np.array([float(i[0]) for i in reader]).reshape(4,4)
+                else:
+                    x = list(reader)
+                    data = np.array(x).astype("float")
 
             print(data)
 
@@ -418,7 +413,8 @@ class GridPlotter:
             im = plt.pcolormesh(self.obss[..., self.first],
                         self.obss[..., self.second]*self.flip_y,
                         data,
-                        cmap="viridis")
+                        cmap=cmap,
+                        vmin=0.0000001)
             fig.colorbar(im)
             ax.set_title(measure)
 
@@ -434,29 +430,47 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--cells', default=10000, type=int)
     args = parser.parse_args()
 
-    #base_env = gym.make("PathologicalMountainCar-v1.1") # maybe we need some extra params...
-    base_env = gym.make("FrozenLake-v1", is_slippery=False) # maybe we need some extra params...
+    if "Frozen" in args.name:
+        obs_grid_converter = frozen_obs2grid
+        base_env = gym.make("FrozenLake-v1", is_slippery=False) # maybe we need some extra params...
+        reward_func = "exact_goal_match_reward"
+    else:
+        obs_grid_converter = None
+        base_env = gym.make("PathologicalMountainCar-v1.1") # maybe we need some extra params...
+        reward_func = "term"
+
     goal_env = GoalWrapper(base_env,
                                     goal_weight=1.0,
                                     goal_range=0.1,
-                                    reward_func="term")
+                                    reward_func=reward_func)
 
-    model_name = os.path.join(args.name, "model")
+    for file in os.listdir(args.name):
+        if file.endswith(".zip"):
+            file_name = file
+            print(file_name)
+
+    model_name = os.path.join(args.name, file_name)
     print(model_name)
     model = DQN.load(model_name, env=goal_env)
     model.policy.set_training_mode(False)
     print(model.policy)
 
+    if args.goal is None:
+        goal = np.array([-1.60, 0.00,]) # hardcoded for patho MC
+    else:
+        goal = np.fromstring(args.goal, dtype=float, sep=' ')
+
     gp = GridPlotter(model,
                      base_env,
                      goal_env,
-                     args.cells,
+                     goal = goal,
+                     size=args.cells,
                      flip_dims=False,
                      flip_y=True,
-                     obs_grid_converter=frozen_obs2grid)
+                     obs_grid_converter=obs_grid_converter)
     # print(f"Goal: {args.goal}")
 
-    q_vals = gp.get_q_vals(goal_s=args.goal)
+    q_vals = gp.get_q_vals(goal=goal)
     # print(q_vals)
     # print(f"Max q: {np.max(q_vals)}")
     # print(f"Min q: {np.min(q_vals)}")
@@ -466,7 +480,8 @@ if __name__ == '__main__':
     #print(diff)
     #print(diff.shape)
 
-    gp.plot_goal_data(args.name)
+    if "uniform" not in args.name:
+        gp.plot_goal_data(args.name)
 
     gp.plot_transitions(diff)
     gp.plot_transitions_single(end, diff)
@@ -474,5 +489,3 @@ if __name__ == '__main__':
     gp.plot_selected_transitions(q_vals, diff)
 
     plt.show()
-
-    #load_n_plot_q_vals(name=args.name)
