@@ -431,7 +431,7 @@ def train(base_path: str = "./data/wrapper/",
     eval_callback = setup_eval("fixed")
     # TODO replace all these checks with non-listed logic
     if baseline_override != "base-rl" and True:
-        clist = setup_evalcallbacks_from_goal_list(max_goals)
+        clist = setup_evalcallbacks_from_goal_list(max_goals, n_eval_episodes=1)
         clist.append(eval_callback)
         eval_callbacks = clist
     elif baseline_override in [None, "uniform-goal", "grid-novelty"]:

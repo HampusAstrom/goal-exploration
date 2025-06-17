@@ -164,6 +164,16 @@ def get_best_x(folders, num2keep, frac_to_eval=0.2, eval_type="eval_logs"):
 
     return np.array(folders)[ind]
 
+def means_for_multi_measure(data, n_eval, func=None):
+    data = np.reshape(data, (-1,n_eval))
+
+    if func is not None:
+        data = func(data)
+
+    # TODO calculate mean (and return separate data too?)
+    mean = np.mean(data, axis=1)
+    return mean
+
 def collect_datas(experiments, eval_type="eval_logs", func=None):
     values = []
     means = []
@@ -180,13 +190,15 @@ def collect_datas(experiments, eval_type="eval_logs", func=None):
                 reader = csv.reader(measure_info, delimiter=' ')
                 m_info = {k: int(v) for [k, v] in reader}
 
-            data = np.reshape(data, (-1,m_info[eval_type]))
+            # data = np.reshape(data, (-1,m_info[eval_type]))
 
-            if func is not None:
-                data = func(data)
+            # if func is not None:
+            #     data = func(data)
 
-            # TODO calculate mean (and return separate data too?)
-            mean = np.mean(data, axis=1)
+            # # TODO calculate mean (and return separate data too?)
+            # mean = np.mean(data, axis=1)
+
+            mean = means_for_multi_measure(data, m_info[eval_type], func=func)
 
             means.append(mean)
             values.append(data)
@@ -213,16 +225,20 @@ def add_subplot(path, window, ax, eval_type="eval_logs", name=None, func=None):
     else:
         ax.plot(x, avg_data, label=str(len(means))+ "exps " + os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07,) # alpha=0.03
+    return x
 
-def plot_individual_experiments(path, window, eval_type="eval_logs", figname=None):
+def plot_individual_experiments(path, window, eval_type="eval_logs", figname=None, func=None):
     experiments = get_all_folders(path)
-    means, values = collect_datas(experiments, eval_type=eval_type)
+    means, values = collect_datas(experiments, eval_type=eval_type, func=func)
     if means is None:
         return
 
     # prep fig/ax
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1000*px, 1000*px))
+
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
+                           cycler('linestyle', ['-', ':','--', '-.']))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
 
     # plot the mean
     means = np.array(means)
@@ -258,7 +274,13 @@ def plot_individual_experiments(path, window, eval_type="eval_logs", figname=Non
     plt.savefig(os.path.join(path,figname), bbox_inches="tight")
     plt.close(fig)
 
-def plot_each_goal_in_exp(path, window, lst=["eval_logs", "train_logs"], exclude=True, figname=None):
+def plot_each_goal_in_exp(path,
+                          window,
+                          n_eval = 1,
+                          lst=["eval_logs", "train_logs"],
+                          put_last = ['[-1.6, 0.0]', '[5.0, 0.0]'],
+                          exclude=True,
+                          figname=None):
     # path should be path ending in exp* here
     # check that exp is completed
     if not os.path.isfile(os.path.join(path, "completed.txt")):
@@ -276,8 +298,14 @@ def plot_each_goal_in_exp(path, window, lst=["eval_logs", "train_logs"], exclude
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1000*px, 1000*px))
 
-    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver', 'gold']) *
-                        cycler('linestyle', ['-', ':', '--', '-.',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+    # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver', 'gold']) *
+    #                     cycler('linestyle', ['-', ':', '--', '-.',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver', 'gold']) *
+                    cycler('linestyle', [':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+
+    goal_prop = iter(cycler('color', ['k']) *
+                    cycler('linestyle', ['--', '-.', (5, (10, 3))]))
 
     plt.rc('axes', titlesize=20)     # fontsize of the axes title
     plt.rc('axes', labelsize=28)    # fontsize of the x and y labels
@@ -285,35 +313,43 @@ def plot_each_goal_in_exp(path, window, lst=["eval_logs", "train_logs"], exclude
     plt.rc('ytick', labelsize=18)    # fontsize of the tick labels
 
     datas = []
-    if exclude is True:
-        numbers = {s: int(s.replace("eval_logs_", "")) for s in names}
-        names = sorted(names, key=numbers.__getitem__)
+    # if exclude is True:
+    #     numbers = {s: int(s.replace("eval_logs_", "")) for s in names}
+    #     names = sorted(names, key=numbers.__getitem__)
     add_last = []
     new_names = []
     for name in names:
-        if "[-1.6" in name or "[0.5" in name:
+        label = name.replace("eval_logs_","")
+        if label in put_last:
             add_last.append(name)
         else:
             new_names.append(name)
     new_names += add_last
     names = new_names
 
-    for eval_type in names:
-        if not os.path.exists(os.path.join(path, eval_type)):
+    for name in names:
+        if not os.path.exists(os.path.join(path, name)):
             return None, None
-        data = np.loadtxt(os.path.join(path, eval_type, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+        data = np.loadtxt(os.path.join(path, name, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+        if n_eval > 1:
+            data = means_for_multi_measure(data, n_eval=n_eval, func=None)
         avg_data = smooth(data, window)
         x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
-        label = eval_type.replace("eval_logs_","")
-        # if "[-1.6" in label: # hardcoded override
-        #     label += " (hard ext. goal)"
-        # if "[0.5" in label: # hardcoded override
-        #     label += " (easy ext. goal)"
+        label = name.replace("eval_logs_","")
+        label = label.replace("[","(")
+        label = label.replace("]",")")
+        if "(-1.6" in label: # hardcoded override
+            label += " hard ext. goal"
+        if "(0.5" in label: # hardcoded override
+            label += " easy ext. goal"
         # if "47" in label: # hardcoded override
         #     label += " (ext. goal)"
-        if "15" in label: # hardcoded override
-            label += " (ext. goal)"
-        ax.plot(x, avg_data, label=label)
+        # if "15" in label: # hardcoded override
+        #     label += " (ext. goal)"
+        if name in add_last:
+            ax.plot(x, avg_data, **next(goal_prop), label=label)
+        else:
+            ax.plot(x, avg_data, label=label, alpha=0.7)
         datas.append(data)
 
     means = np.mean(datas, axis=0)
@@ -322,14 +358,14 @@ def plot_each_goal_in_exp(path, window, lst=["eval_logs", "train_logs"], exclude
     if len(names) > 1:
         avg_std = smooth(std, window)
         x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
-        ax.plot(x, avg_data, label="average", zorder=100, color='magenta', linestyle=(5, (10, 3)))
-        ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07, zorder=100, color='magenta')
+        ax.plot(x, avg_data, label="average", zorder=100, color='k', linestyle='-')
+        ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07, zorder=1, color='k')
     else:
         avg_std = np.zeros_like(avg_data)
 
     ax.legend(loc='lower center',
               bbox_to_anchor=(0.5, 0.0), # (0.65, 0.1), cliff #
-              prop={'size': 14}, # 8 # 11 cliff
+              prop={'size': 11.5}, # 11.5 patho # 14 frozen # 11 cliff
               fancybox=True,
               ncol=4,
               framealpha=0.9).set_zorder(101)
@@ -399,15 +435,18 @@ def plot_all_in_folder(dir,
 
     for i, folder in enumerate(folders):
         if name_override != None:
-            add_subplot(folder, window, ax, eval_type=eval_type, name=name_override[i], func=func)
+            x = add_subplot(folder, window, ax, eval_type=eval_type, name=name_override[i], func=func)
         else:
-            add_subplot(folder, window, ax, eval_type=eval_type, func=func)
+            x = add_subplot(folder, window, ax, eval_type=eval_type, func=func)
+
+    # oracle = np.ones(x.shape)*0.7
+    # ax.plot(x, oracle, label="oracle", zorder=100, color='magenta', linestyle=':')
 
     if cutoff is not None:
         ax.set_xlim([0, cutoff])
 
-    # if func is None: # cliff
-    #     ax.set_ylim(top=-2)
+    if func is None: # cliff
+        ax.set_ylim(top=-2)
 
     # HANDMADE OVERRIDE
     names = ["Intermediate Success", "Novelty",
@@ -415,7 +454,7 @@ def plot_all_in_folder(dir,
     for i, name in enumerate(names):
         ax.lines[i].set_label(name)
 
-    ax.legend(loc='lower right', # loc='upper left',
+    ax.legend(loc='upper left', # loc='upper left',
               prop={'size': 18}, # 8
               fancybox=True,
               framealpha=0.2).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
@@ -454,11 +493,13 @@ def plot_all_in_folder(dir,
         plot_individual_experiments(folder,
                                     window=window,
                                     eval_type=eval_type,
-                                    figname=f"window{window}_" + name)
+                                    figname=f"window{window}_" + name,
+                                    func=func)
         plot_individual_experiments(folder,
                                     window=1,
                                     eval_type=eval_type,
-                                    figname="unsmoothed_" + name)
+                                    figname="unsmoothed_" + name,
+                                    func=func)
 
     if not goal_plots:
         return
@@ -502,14 +543,20 @@ if __name__ == '__main__':
         eval_freq = 10000
         thresh = 1
         symlog_y = False
+        n_eval = 5
+        put_last = ['15']
     elif "Patho" in folder:
         eval_freq = 50000
         thresh = 11
         symlog_y = False
+        n_eval = 1
+        put_last = ['[-1.6, 0.0]', '[0.5, 0.0]']
     elif "Cliff" in folder:
         eval_freq = 50000
         thresh = -14.0
         symlog_y = True
+        n_eval = 1
+        put_last = ['47']
 
     plot_all_in_folder(folder,
                        coord_names = coord_names,
@@ -534,6 +581,7 @@ if __name__ == '__main__':
                        indi_plots=False,
                        func=threshold_gen(thresh)
                        )
+
     # plot_all_in_folder(folder,
     #                    coord_names = coord_names,
     #                    num2keep=int(args.top),
@@ -565,10 +613,13 @@ if __name__ == '__main__':
             # plot goal successes
             avg_data, avg_std = plot_each_goal_in_exp(exp,
                                                       20,
+                                                      n_eval=n_eval,
+                                                      put_last=put_last,
                                                       figname="goal_success_rate")
             # plot training success rate
             plot_each_goal_in_exp(exp,
                                   100,
+                                  n_eval=1,
                                   lst=["train_logs"],
                                   exclude=False,
                                   figname="train_success_rate")
