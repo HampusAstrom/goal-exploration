@@ -1,12 +1,21 @@
-# This repo os a fork from Stable Baselines3
+# This repo is a fork from Stable Baselines3
 
 This work is published here: https://openreview.net/pdf?id=RfJbVuHCgx
 
 More detailed instructions for how to run and play around with the code to come.
 
-The wrapper can be found in goal_wrapper.py, and the main script I have for running
-it is found in goal_wrapper_run.py
+The wrapper can be found in:
+goal_wrapper.py
+and the main script I have for running it is found in:
+goal_wrapper_run.py
 
+The pathological mountain car environment is implemented in:
+pathological_mc.py
+
+Those are the main code contributions (though they may use some code in utils.py).
+But it is also worth noting that some changes have been made in the regular
+Stable Baselines3 code, mainly updating HER to account for goals induced
+termination in hindsight.
 
 <img src="docs/\_static/img/logo.png" align="right" width="40%"/>
 
