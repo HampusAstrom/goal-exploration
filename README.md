@@ -1,3 +1,13 @@
+# This repo os a fork from Stable Baselines3
+
+This work is published here: https://openreview.net/pdf?id=RfJbVuHCgx
+
+More detailed instructions for how to run and play around with the code to come.
+
+The wrapper can be found in goal_wrapper.py, and the main script I have for running
+it is found in goal_wrapper_run.py
+
+
 <img src="docs/\_static/img/logo.png" align="right" width="40%"/>
 
 <!-- [![pipeline status](https://gitlab.com/araffin/stable-baselines3/badges/master/pipeline.svg)](https://gitlab.com/araffin/stable-baselines3/-/commits/master) -->
