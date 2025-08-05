@@ -17,6 +17,8 @@ But it is also worth noting that some changes have been made in the regular
 Stable Baselines3 code, mainly updating HER to account for goals induced
 termination in hindsight.
 
+Feel free to reach out to me at "hampus (dot) astrom (at) cs (dot) lth (dot) se"
+
 <img src="docs/\_static/img/logo.png" align="right" width="40%"/>
 
 <!-- [![pipeline status](https://gitlab.com/araffin/stable-baselines3/badges/master/pipeline.svg)](https://gitlab.com/araffin/stable-baselines3/-/commits/master) -->
