@@ -102,6 +102,9 @@ class HerReplayBuffer(DictReplayBuffer):
         self.ep_length = np.zeros((self.buffer_size, self.n_envs), dtype=np.int64)
         self._current_ep_start = np.zeros(self.n_envs, dtype=np.int64)
 
+        # TODO add parameters to turn on priority and if so, structure to store
+        # priority information (on a per transition and/or trajectory basis)
+
     def __getstate__(self) -> Dict[str, Any]:
         """
         Gets state for pickling.
@@ -170,6 +173,14 @@ class HerReplayBuffer(DictReplayBuffer):
             if done[env_idx]:
                 self._compute_episode_length(env_idx)
 
+        # TODO add code to store priority metric of transitions before in this method and/or entire
+        # trajectory priority here
+        # if coverage metric, track grid cell for each transition (at least when collecting it)
+        # then compute grid visitation stats for tajectory when done signal
+        # as well as update global visitation statistics
+        # if doing deleting above, remember to consider removing the trajectory's
+        # statistics from the total too (at least for normalization)
+
     # could be used later if we skip passing non-copies of info up to the policy/algo
     def replace(
         self,
@@ -233,6 +244,9 @@ class HerReplayBuffer(DictReplayBuffer):
         # Those indices are obtained back using np.unravel_index(valid_indices, is_valid.shape)
         valid_indices = np.flatnonzero(is_valid)
         # Sample valid transitions that will constitute the minibatch of size batch_size
+
+        # TODO insert Prioratized experience replay based index selection here
+
         sampled_indices = np.random.choice(valid_indices, size=batch_size, replace=True)
         # Unravel the indexes, i.e. recover the batch and env indices.
         # Example: if sampled_indices = [0, 3, 5], then batch_indices = [0, 1, 1] and env_indices = [0, 0, 2]
@@ -261,6 +275,10 @@ class HerReplayBuffer(DictReplayBuffer):
         dones = th.cat((virtual_data.dones, real_data.dones))
         rewards = th.cat((virtual_data.rewards, real_data.rewards))
         infos = np.concatenate((virtual_data.infos, real_data.infos), axis=0)
+
+        # TODO add code to update priority based on stuff here, alternately
+        # by making method that learn can call to update prio based on
+        # the results of the learning process (if applicable)
 
         return InfoDictReplayBufferSamples(
             observations=observations,
@@ -442,6 +460,8 @@ class HerReplayBuffer(DictReplayBuffer):
         elif self.goal_selection_strategy == GoalSelectionStrategy.EPISODE:
             # Replay with random state which comes from the same episode as current transition
             transition_indices_in_episode = np.random.randint(0, batch_ep_length)
+
+        # TODO add option for based on PER priority to see if that makes it worse or better?
 
         else:
             raise ValueError(f"Strategy {self.goal_selection_strategy} for sampling goals not supported!")
