@@ -7,7 +7,7 @@ import inspect
 import json
 import utils
 
-from stable_baselines3 import SAC, HerReplayBuffer, DQN
+from stable_baselines3 import SAC, HerReplayBuffer, DQN, PPO
 from stable_baselines3.dqn import DQNwithICM
 from stable_baselines3.sac import SACwithICM
 from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
@@ -126,6 +126,9 @@ def train(base_path: str = "./data/wrapper/",
           baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
           verbose = 0,
           test_needed_experiments = False,
+          algo_override = None,
+          n_sampled_goal = 4, # Create 4 artificial transitions per real transition
+          t2g_ratio = (1, "raw"), # train2gather ratio, first ratio, last "her" if mult with her_factor
          ):
 
     base_path = os.path.join(base_path,env_id)
@@ -139,9 +142,6 @@ def train(base_path: str = "./data/wrapper/",
         eval_freq = 10000
     else:
         raise "Error, set eval_freq for this env"
-
-    # Create 4 artificial transitions per real transition
-    n_sampled_goal = 4
 
     # Collect variables to store in json before cluttered
     conf_params = locals()
@@ -174,14 +174,31 @@ def train(base_path: str = "./data/wrapper/",
     if buffer_size != int(1e6): # if not default
         options += "_" + str(buffer_size) + "buffer_size"
 
+    if n_sampled_goal != 4 and baseline_override not in ["base-rl"]:
+        options += "_" + str(n_sampled_goal+1) + "her_factor"
+
+    if t2g_ratio != (1, "raw"):
+        if t2g_ratio[1] == "her":
+            options += "_herX" + str(t2g_ratio[0]) + "t2g"
+        else:
+            options += "_" + str(t2g_ratio[0]) + "t2g"
+
+    if algo_override is not None:
+        options += "_" + str(algo_override.__name__)
+
+    if t2g_ratio[1] == "her":
+        t2g = t2g_ratio[0]*(n_sampled_goal+1)
+    else:
+        t2g = t2g_ratio[0]
+
     # TODO hard coded options addition
     #options += "_256-256-256-256-256net"
     #options += "_finetune_at0.7_1.0of_time"#"_no_hindsight_then"
     #options += "_gradually_reduce_hindsight_from_0.8_to_0"
     #options += "_her_episode_gradually_reduce_hindsight_from_0.8_to_0"
-    #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net"
     #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net_exploration_fraction0.5_more_novelty_focus"
-    options += "_batch_size512_train_freq512_lr_1e-3_3x256net"#_more_novelty_focus"
+    #options += "_batch_size512_train_freq512_lr_1e-3_3x256net"#_more_novelty_focus"
+    options += "_batch_size512_lr_1e-3_2x256net" # _0.1-0.01_epsilonexplore #4x256resblock-x4net" #_no_term_in_real"
 
     print(options)
 
@@ -233,6 +250,8 @@ def train(base_path: str = "./data/wrapper/",
         del conf_params["fixed_goal_fraction"]
     if baseline_override in ["base-rl", "curious"]:
         del conf_params["goal_weight"]
+    if algo_override is not None:
+        conf_params["algo_override"] = conf_params["algo_override"].__name__
     with open(os.path.join(base_path, options, experiment, 'config.json'), 'w') as fp:
         json.dump(conf_params, fp, indent=4)
 
@@ -328,6 +347,8 @@ def train(base_path: str = "./data/wrapper/",
         algo = DQNwithICM
         if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
+    if algo_override is not None:
+        algo = algo_override
 
     def setup_evalcallbacks_from_goal_list(goals, freq=eval_freq, n_eval_episodes=1):
 
@@ -468,6 +489,7 @@ def train(base_path: str = "./data/wrapper/",
     # TODO change here from Her buffer or just run without
     # without goal conditioning (but still truncated and hardstart)
     # could hack compute reward but that is probably just confusing
+    batch_size = 512
     model = algo(policy,
                 train_env,
                 **algo_kwargs,
@@ -476,12 +498,14 @@ def train(base_path: str = "./data/wrapper/",
                 buffer_size=buffer_size,
                 learning_rate=1e-3,
                 gamma=0.95,
-                batch_size=512,
-                train_freq=512,
+                batch_size=batch_size,
+                train_freq=int(batch_size/t2g),
                 #exploration_fraction=1.0,
                 #target_update_interval=1000,
                 #gradient_steps=-1,
-                policy_kwargs=dict(net_arch=[256, 256, 256],),
+                #policy_kwargs=dict(net_arch=[256, 256, 256],),
+                #policy_kwargs=dict(net_arch=[128, 128, 128],),
+                policy_kwargs=dict(net_arch=[256, 256],),
                 #policy_kwargs=dict(net_arch=[64, 64],),
                 #policy_kwargs=dict(net_arch=[256, 256, 256, 256, 256, 256, 256, 256, 256],),
                 #policy_kwargs=dict(net_arch={"res-block": [256, 256, 256, 256], "num_blocks": 4},),
@@ -727,9 +751,9 @@ if __name__ == '__main__':
     #                         "escalate_exploit": [True],
     #                         "norm_comps": [True],
     #                         }
-    goal_conf_to_permute = {"grid_size": [10000],
+    goal_conf_to_permute = {"grid_size": [100],
                             "fraction_random": [0.1],
-                            #"target_success_rate": [0.75],
+                            #"target_success_rate": [0.75], # turn on if intermediate instead of novelty # 0.75
                             "dist_decay": [2],
                             }
 
@@ -738,7 +762,7 @@ if __name__ == '__main__':
     frozen_env_params = {"is_slippery": [True]}
     cliffwalker_env_params = {"max_episode_steps": [300]} # override to play nice with HER #{"is_slippery": [False]}
 
-    env_id = "FrozenLake-v1" # "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    env_id = "PathologicalMountainCar-v1.1" # "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
     # TODO get updated gym envs with cliffwalking v1
 
     if env_id == "SparsePendulumEnv-v1":
@@ -757,18 +781,21 @@ if __name__ == '__main__':
     #               #"is_slippery": [True]
     #               }
 
-    params_to_permute = {"experiments": [4],
+    params_to_permute = {"experiments": [2],
                          "env_id": [env_id],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cuda"],
-                         "steps": [1000000],
+                         "steps": [10_000_000], # 10_000_000 pmc default
                          "goal_weight": [1.0],
-                         "goal_range": [0.1],
+                         "goal_range": [0.01],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
-                         "reward_func": ["exact_goal_match_reward"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
-                         "buffer_size": [1000000],
-                         "baseline_override": ["grid-novelty"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
+                         "reward_func": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
+                         "buffer_size": [10_000_000],
+                         "baseline_override": ["uniform-goal"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
+                         #"algo_override": [PPO],
+                         "n_sampled_goal": [4],
+                         "t2g_ratio": [(1, "her")], #first part ratio, last "raw" if raw or "her" on top of her ratio
                          }
 
     base_path = "./output/wrapper/"
