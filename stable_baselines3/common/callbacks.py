@@ -407,6 +407,8 @@ class EvalCallback(EventCallback):
         self._is_success_buffer: List[bool] = []
         self.evaluations_successes: List[List[bool]] = []
 
+        self.initial_value_func: List[List[float]] = []
+
     def _init_callback(self) -> None:
         # Does not work in some corner cases, where the wrapper is not the same
         if not isinstance(self.training_env, type(self.eval_env)):
@@ -456,7 +458,7 @@ class EvalCallback(EventCallback):
             # Reset success rate buffer
             self._is_success_buffer = []
 
-            episode_rewards, episode_lengths = evaluate_policy(
+            episode_rewards, episode_lengths, initial_values = evaluate_policy(
                 self.model,
                 self.eval_env,
                 n_eval_episodes=self.n_eval_episodes,
@@ -474,6 +476,7 @@ class EvalCallback(EventCallback):
                 self.evaluations_timesteps.append(self.num_timesteps)
                 self.evaluations_results.append(episode_rewards)
                 self.evaluations_length.append(episode_lengths)
+                self.initial_value_func.append(initial_values)
 
                 kwargs = {}
                 # Save success log if present
@@ -486,12 +489,14 @@ class EvalCallback(EventCallback):
                     timesteps=self.evaluations_timesteps,
                     results=self.evaluations_results,
                     ep_lengths=self.evaluations_length,
+                    initial_v=self.initial_value_func,
                     **kwargs,
                 )
 
             mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
             mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
             self.last_mean_reward = float(mean_reward)
+            mean_initial_values = np.mean(initial_values)
 
             if self.verbose >= 1:
                 print(f"Eval num_timesteps={self.num_timesteps}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
@@ -499,6 +504,7 @@ class EvalCallback(EventCallback):
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
             self.logger.record("eval/mean_ep_length", mean_ep_length)
+            self.logger.record("eval/mean_initial_values", mean_initial_values)
 
             if len(self._is_success_buffer) > 0:
                 success_rate = np.mean(self._is_success_buffer)

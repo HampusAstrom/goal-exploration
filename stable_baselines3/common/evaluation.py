@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import gymnasium as gym
 import numpy as np
+import torch as th
 
 from stable_baselines3.common import type_aliases
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecMonitor, is_vecenv_wrapped
@@ -133,8 +134,19 @@ def evaluate_policy(
 
     mean_reward = np.mean(episode_rewards)
     std_reward = np.std(episode_rewards)
+
+    observations = env.reset(seed=seed)
+    initial_values = []
+    for episode in range(np.max(episode_count_targets)):
+        init_obs, _ = model.policy.obs_to_tensor(observations)
+        with th.no_grad():
+            q_values = model.q_net.forward(init_obs).cpu().numpy()
+        initial_values.append(np.max(q_values, 1))
+
+    initial_values = np.array(initial_values)
+
     if reward_threshold is not None:
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
     if return_episode_rewards:
-        return episode_rewards, episode_lengths
-    return mean_reward, std_reward
+        return episode_rewards, episode_lengths, initial_values
+    return mean_reward, std_reward, initial_values
