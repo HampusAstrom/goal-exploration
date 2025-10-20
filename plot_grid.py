@@ -39,6 +39,28 @@ def frozen_obs2grid(obs, grid = [4, 4]):
 def frozen_grid2obs(grid_cell, grid = [4, 4]):
     return grid_cell[1]*grid[0] + grid_cell[0]
 
+
+cdict = {
+    'red': (
+        (0.0, 0.0, 0.0),
+        (0.5, 0.0, 1.0),
+        (1.0, 1.0, 0.0),
+    ),
+    'green': (
+        (0.0, 0.0, 0.0),
+        (0.5, 1.0, 1.0),
+        (1.0, 0.0, 0.0),
+    ),
+    'blue': (
+        (0.0, 0.0, 1.0),
+        (0.5, 1.0, 0.0),
+        (1.0, 0.0, 0.0),
+    )
+}
+
+custom1 = mpl.colors.LinearSegmentedColormap('BlueRed1', cdict)
+
+
 class GridPlotter:
     def __init__(self,
                  model,
@@ -46,6 +68,7 @@ class GridPlotter:
                  goal_env,
                  goal,
                  size=10000,
+                 size_goals=10000,
                  flip_dims = False,
                  flip_y = False,
                  obs_grid_converter = None,
@@ -74,10 +97,12 @@ class GridPlotter:
         if not obs_grid_converter:
             # TODO handle if this needs flattening
             self.shape = [int(size**(1/dims))]*dims
+            self.shape_goals = [int(size_goals**(1/dims))]*dims
             self.high = self.goal_env.observation_space["observation"].high
             self.low = self.goal_env.observation_space["observation"].low
             # TODO handle non-closed dims
             self.cell_size = (self.high-self.low)/self.shape
+            self.cell_size_goals = (self.high-self.low)/self.shape_goals
         else:
             self.obs_grid_converter = obs_grid_converter
             self.shape = [4, 4] # TODO replace shitty hardcoded
@@ -92,15 +117,25 @@ class GridPlotter:
         obss = np.array(obs_arr)
         self.obss = obss.reshape(self.shape+[len(self.shape)])
 
+        obs_arr = []
+        for index in np.ndindex(tuple(self.shape_goals)):
+            if not obs_grid_converter:
+                obs_arr.append(self.center_of_cell(index, self.cell_size_goals))
+            else:
+                obs_arr.append(index)
+        obss = np.array(obs_arr)
+        self.obss_goals = obss.reshape(self.shape_goals+[len(self.shape_goals)])
 
     def sample_in_cell(self, cell):
         # select a goal in this cell
         rand = np.random.rand(len(self.shape))
         return self.low + (cell+rand)*self.cell_size
 
-    def center_of_cell(self, cell):
+    def center_of_cell(self, cell, cell_size=None):
+        if cell_size is None:
+            cell_size = self.cell_size
         scell = tuple(np.array(cell) + 0.5)
-        return self.low + (scell)*self.cell_size
+        return self.low + (scell)*cell_size
 
     def point2cell(self, obs):
         # obs = obs["observation"]
@@ -195,6 +230,9 @@ class GridPlotter:
         max_filter = vals < maxes[..., np.newaxis]
         filtered_over_median = vals-medians[..., np.newaxis]
         filtered_over_median[max_filter] = -1
+        advantage = vals - maxes[..., np.newaxis]
+        filtered_advantage = advantage.copy()
+        filtered_advantage[vals == maxes[..., np.newaxis]] = 1
 
         if segment:
             subplot_rows = 3
@@ -213,8 +251,13 @@ class GridPlotter:
 
         #x, y = zip(*self.obss.copy().reshape(-1, 2))
         #valrow = vals.reshape(-1, nplots)
-        cmap = mpl.cm.get_cmap("viridis").copy()
-        cmap.set_under(color='white')
+        cmap = mpl.cm.get_cmap("plasma").copy()
+        #cmap.set_under(color='white')
+        cmap.set_over(color='white')
+        custom2 = custom1.copy()
+        custom2.set_over(color='black')
+        #q_norm = mpl.colors.CenteredNorm(vcenter=0, clip=True)
+        #q_norm.vmax = 1
 
         for p in range(nplots):
             # ax = fig.add_subplot(1, nplots, p+1, projection='3d')
@@ -228,22 +271,35 @@ class GridPlotter:
             plt.pcolormesh(self.obss[..., self.first],
                            self.obss[..., self.second]*self.flip_y,
                            vals[..., p],
-                           cmap="viridis")
+                           norm=mpl.colors.CenteredNorm(),
+                           cmap=custom2)
+            plt.colorbar()
             self.show_goal_point()
             ax = fig.add_subplot(subplot_rows, nplots, nplots+p+1)
             # TODO fix colormap scale, especially for segement version, so they match
-            plt.pcolormesh(self.obss[..., self.first],
+            plt.pcolormesh(self.obss[..., self.first], # show distance between selected action and next best
                         self.obss[..., self.second]*self.flip_y,
                         vals[..., p]-medians,
-                        cmap="plasma")
+                           norm=mpl.colors.CenteredNorm(),
+                        cmap=custom1)
+            plt.colorbar()
             self.show_goal_point()
-            if segment and np.max(filtered_over_median[..., p])>np.min(filtered_over_median[..., p]):
+            # if segment and np.max(filtered_over_median[..., p])>np.min(filtered_over_median[..., p]):
+            #     ax = fig.add_subplot(subplot_rows, nplots, 2*nplots+p+1)
+            #     plt.pcolormesh(self.obss[..., self.first],
+            #                 self.obss[..., self.second]*self.flip_y,
+            #                 filtered_over_median[..., p],
+            #                 cmap=cmap,
+            #                 vmin=0.0000001)
+            if segment and np.max(filtered_advantage[..., p])>np.min(filtered_advantage[..., p]):
                 ax = fig.add_subplot(subplot_rows, nplots, 2*nplots+p+1)
                 plt.pcolormesh(self.obss[..., self.first],
                             self.obss[..., self.second]*self.flip_y,
-                            filtered_over_median[..., p],
+                            filtered_advantage[..., p],
                             cmap=cmap,
-                            vmin=0.0000001)
+                            vmax=0.0000001,
+                            )
+            plt.colorbar()
             self.show_goal_point()
 
         #plt.show()
@@ -370,7 +426,7 @@ class GridPlotter:
         #"n_shape",
 
         px = 1/plt.rcParams['figure.dpi']
-        fig = plt.figure(figsize=(1920*px, 1080*px))
+        # fig = plt.figure(figsize=(1920*px, 1080*px))
         subplot_rows = int(np.floor(np.sqrt(len(grid_files))))
         nplots = len(grid_files)
         fig, axes = plt.subplots(subplot_rows,
@@ -410,8 +466,8 @@ class GridPlotter:
             ax = fig.add_subplot(subplot_rows, nplots//subplot_rows, p+1)
             # ax.set_xticks([])
             # ax.set_yticks([])
-            im = plt.pcolormesh(self.obss[..., self.first],
-                        self.obss[..., self.second]*self.flip_y,
+            im = plt.pcolormesh(self.obss_goals[..., self.first],
+                        self.obss_goals[..., self.second]*self.flip_y,
                         data,
                         cmap=cmap,
                         vmin=0.0000001)
@@ -424,10 +480,11 @@ class GridPlotter:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-n', '--name', default="/home/hampus/rl/goal-exploration/output/wrapper/PathologicalMountainCar-v1.1/2000000steps_grid-novelty-baseline_256-256-256-256-256net/exp1")
+    parser.add_argument('-n', '--name', default="/home/hampus/rl/goal-exploration/output/wrapper/PathologicalMountainCar-v1.1/10000000steps_1.0goalrewardWeight_0.0fixedGoalFraction_0.1goal_range_term-reward_func_10000grid_size_0.1fraction_random_2dist_decay_her*0.5t2g_batch_size512_lr_1e-3_4x256resblock-x4net/exp2")
     parser.add_argument('-g', '--goal', default=None)
     parser.add_argument('-s', '--segment', action="store_true")
     parser.add_argument('-c', '--cells', default=10000, type=int)
+    parser.add_argument('-o', '--goalcells', default=10000, type=int)
     args = parser.parse_args()
 
     if "Frozen" in args.name:
@@ -465,15 +522,16 @@ if __name__ == '__main__':
                      goal_env,
                      goal = goal,
                      size=args.cells,
+                     size_goals=args.goalcells,
                      flip_dims=False,
-                     flip_y=True,
+                     flip_y=False,
                      obs_grid_converter=obs_grid_converter)
     # print(f"Goal: {args.goal}")
 
     q_vals = gp.get_q_vals(goal=goal)
     # print(q_vals)
-    # print(f"Max q: {np.max(q_vals)}")
-    # print(f"Min q: {np.min(q_vals)}")
+    print(f"Max q: {np.max(q_vals)}")
+    print(f"Min q: {np.min(q_vals)}")
     gp.plot_q_vals(q_vals, args.segment)
 
     end, diff = gp.get_steps()
