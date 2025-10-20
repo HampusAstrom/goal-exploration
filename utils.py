@@ -56,6 +56,8 @@ def gaussian_window_smooth(data, window):
     return gaussian_filter(data, sigma=sigma)
 
 smooth = gaussian_window_smooth
+# smooth = window_smooth
+# smooth = ema_smooth
 
 # num is number of elements to fill, should be between 1 and len(weights)
 def weight_combinations(weights, num):
@@ -221,9 +223,9 @@ def add_subplot(path, window, ax, eval_type="eval_logs", name=None, func=None):
     avg_std = smooth(std, window)
     x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
     if name != None:
-        ax.plot(x, avg_data, label=str(len(means))+ "exps " + name)
+        ax.plot(x, avg_data, label=str(len(means))+ "exps " + f" {np.mean(data):.3f} mean " + name)
     else:
-        ax.plot(x, avg_data, label=str(len(means))+ "exps " + os.path.basename(path))
+        ax.plot(x, avg_data, label=str(len(means))+ "exps " + f" {np.mean(data):.3f} mean " + os.path.basename(path))
     ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07,) # alpha=0.03
     return x
 
@@ -238,7 +240,7 @@ def plot_individual_experiments(path, window, eval_type="eval_logs", figname=Non
     fig, ax = plt.subplots(figsize=(1000*px, 1000*px))
 
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
-                           cycler('linestyle', ['-', ':','--', '-.']))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+                           cycler('linestyle', ['-',':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
 
     # plot the mean
     means = np.array(means)
@@ -280,6 +282,7 @@ def plot_each_goal_in_exp(path,
                           lst=["eval_logs", "train_logs"],
                           put_last = ['[-1.6, 0.0]', '[5.0, 0.0]'],
                           exclude=True,
+                          func=None,
                           figname=None):
     # path should be path ending in exp* here
     # check that exp is completed
@@ -303,6 +306,7 @@ def plot_each_goal_in_exp(path,
 
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver', 'gold']) *
                     cycler('linestyle', [':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+    # TODO find out why this isn't applying
 
     goal_prop = iter(cycler('color', ['k']) *
                     cycler('linestyle', ['--', '-.', (5, (10, 3))]))
@@ -332,7 +336,10 @@ def plot_each_goal_in_exp(path,
             return None, None
         data = np.loadtxt(os.path.join(path, name, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
         if n_eval > 1:
-            data = means_for_multi_measure(data, n_eval=n_eval, func=None)
+            data = means_for_multi_measure(data, n_eval=n_eval, func=func)
+        else:
+            if func is not None:
+                data = func(data)
         avg_data = smooth(data, window)
         x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
         label = name.replace("eval_logs_","")
@@ -351,6 +358,13 @@ def plot_each_goal_in_exp(path,
         else:
             ax.plot(x, avg_data, label=label, alpha=0.7)
         datas.append(data)
+
+        # try to get and show initial_v data TODO
+        if os.path.exists(os.path.join(path, name, "evaluations.npz")):
+            evals = np.load(os.path.join(path, name, "evaluations.npz"))
+            lst = evals.files
+            for item in lst:
+                print(f"{name} {item} {evals[item].flatten()}")
 
     means = np.mean(datas, axis=0)
     std = np.std(datas, axis=0)
@@ -388,16 +402,16 @@ def plot_all_in_folder(dir,
                        goal_plots=False,
                        indi_plots=True,
                        cutoff=None,
-                       window=50,
+                       window=50,# 50
                        func=None,
                        symlog_y=False,
                        ):
 
     # TODO replace with something that adaps to number of configurations
-    # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
-    #                        cycler('linestyle', ['-', ':','--', '-.']))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
-    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k']) +
-                               cycler('linestyle', ['-', ':','--', '-.'])))
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
+                           cycler('linestyle', ['-',':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+    # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k']) +
+    #                            cycler('linestyle', ['-', ':','--', '-.'])))
 
     plt.rc('axes', titlesize=20)     # fontsize of the axes title
     plt.rc('axes', labelsize=28)    # fontsize of the x and y labels
@@ -405,7 +419,7 @@ def plot_all_in_folder(dir,
     plt.rc('ytick', labelsize=18)    # fontsize of the tick labels
 
     px = 1/plt.rcParams['figure.dpi']
-    fig, ax = plt.subplots(figsize=(1000*px, 1000*px))
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px)) # (1000*px, 1000*px)
 
     # get all experiments
     folders = get_all_folders(dir)
@@ -445,17 +459,17 @@ def plot_all_in_folder(dir,
     if cutoff is not None:
         ax.set_xlim([0, cutoff])
 
-    if func is None: # cliff
-        ax.set_ylim(top=-2)
+    # if func is None: # cliff
+    #     ax.set_ylim(top=-2)
 
     # HANDMADE OVERRIDE
-    names = ["Intermediate Success", "Novelty",
-             "Uniform Random", "Baseline"]
-    for i, name in enumerate(names):
-        ax.lines[i].set_label(name)
+    # names = ["Intermediate Success", "Novelty",
+    #          "Uniform Random", "Baseline"]
+    # for i, name in enumerate(names):
+    #     ax.lines[i].set_label(name)
 
-    ax.legend(loc='upper left', # loc='upper left',
-              prop={'size': 18}, # 8
+    ax.legend(loc='upper left', # loc='upper left', # 'lower right'
+              prop={'size': 8}, # 8 # 18
               fancybox=True,
               framealpha=0.2).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
     ax.set_xlabel("steps")
@@ -531,8 +545,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     #folder, coord_names = "./output/wrapper/SparsePendulumEnv-v1", ["x", "y", "ang. vel."],
-    #folder, coord_names = "./output/wrapper/PathologicalMountainCar-v1.1", ["xpos", "velocity"], # _high_freq_eval
-    folder, coord_names = "./output/wrapper/FrozenLake-v1", ["index"], # TODO replace with grid reshape
+    folder, coord_names = "./output/wrapper/PathologicalMountainCar-v1.1", ["xpos", "velocity"], # _high_freq_eval
+    #folder, coord_names = "./output/wrapper/FrozenLake-v1", ["index"], # TODO replace with grid reshape
     #folder, coord_names = "./output/wrapper/CliffWalking-v0", ["index"]
 
     #folder, coord_names = "./output/wrapper/PathologicalMountainCar-v1.1_outdated_goal_selection_versions/intermediate_prior_to_0.5_factor_in_target_vs_visits", ["xpos", "velocity"]
@@ -566,7 +580,7 @@ if __name__ == '__main__':
                        name_override=args.name_override,
                        eval_type="eval_logs",
                        cutoff=args.cutoff,
-                       window=10,
+                       window=10, #10
                        symlog_y=symlog_y,
                        )
     plot_all_in_folder(folder,
@@ -577,7 +591,7 @@ if __name__ == '__main__':
                        name_override=args.name_override,
                        eval_type="eval_logs",
                        cutoff=args.cutoff,
-                       window=10,
+                       window=10, #10
                        indi_plots=False,
                        func=threshold_gen(thresh)
                        )
@@ -605,6 +619,7 @@ if __name__ == '__main__':
     avg_datas = []
     avg_stds = []
     names = []
+    num_exps = []
     for name, path in setups:
         exps = get_all_folders(path)
         exp_datas = []
@@ -612,7 +627,7 @@ if __name__ == '__main__':
         for exp in exps:
             # plot goal successes
             avg_data, avg_std = plot_each_goal_in_exp(exp,
-                                                      20,
+                                                      window=20, # 20
                                                       n_eval=n_eval,
                                                       put_last=put_last,
                                                       figname="goal_success_rate")
@@ -622,6 +637,7 @@ if __name__ == '__main__':
                                   n_eval=1,
                                   lst=["train_logs"],
                                   exclude=False,
+                                  func=threshold_gen(1), # TODO replace with non pmc hardcoded
                                   figname="train_success_rate")
             if avg_data is None or avg_data.shape == ():
                 continue
@@ -637,34 +653,35 @@ if __name__ == '__main__':
             avg_datas.append(exp_datas.flatten())
             avg_stds.append(exp_stds.flatten())
             names.append(name)
+            num_exps.append(len(exps))
 
-
-    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k']) +
-                            cycler('linestyle', ['-', ':','--', '-.'])))
+    # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k']) +
+    #                         cycler('linestyle', ['-', ':','--', '-.'])))
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
+                        cycler('linestyle', ['-',':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
 
     px = 1/plt.rcParams['figure.dpi']
-    fig, ax = plt.subplots(figsize=(1000*px, 1000*px))
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
 
     plt.rc('axes', titlesize=10)     # fontsize of the axes title
     plt.rc('axes', labelsize=12)    # fontsize of the x and y labels
     plt.rc('xtick', labelsize=8)    # fontsize of the tick labels
     plt.rc('ytick', labelsize=8)    # fontsize of the tick labels
 
-    x = np.linspace(0, len(avg_datas[0])*eval_freq, len(avg_datas[0]))
-
-    for name, data, std in zip(names, avg_datas, avg_stds):
+    for name, data, std, num_exp in zip(names, avg_datas, avg_stds, num_exps):
         if data.size == 0:
             break
-        ax.plot(x, data, label=name, zorder=2)
+        x = np.linspace(0, len(data)*eval_freq, len(data))
+        ax.plot(x, data, label=str(num_exp)+ "exps " + f" {np.mean(data):.3f} mean " + name, zorder=2)
         ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
 
-    names = ["Intermediate Success", "Novelty",
-             "Uniform Random",]
-    for i, name in enumerate(names):
-        ax.lines[i].set_label(name)
+    # names = ["Intermediate Success", "Novelty",
+    #          "Uniform Random",]
+    # for i, name in enumerate(names):
+    #     ax.lines[i].set_label(name)
 
-    ax.legend(loc='lower right', # 'upper left'
-              prop={'size': 18}, # 8
+    ax.legend(loc='lower left', # 'upper left' # 'lower right'
+              prop={'size': 8}, # 8 # 18
               fancybox=True,
               framealpha=0.8).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
 
