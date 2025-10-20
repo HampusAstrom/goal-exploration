@@ -164,9 +164,12 @@ class GoalWrapper(
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
         # output weighted average of rewards
-        er = np.array([dct["extrinsic_reward"] for dct in info])
         goal_reward = goal_reward.flatten() # TODO confirm that this does not break anything in some env
+        if gw == 1:
+            return goal_reward
+        er = np.array([dct["extrinsic_reward"] for dct in info])
         return gw*goal_reward + (1-gw)*er
+
 
     def set_goal_strategies(self,
                             goal_selection_strategies,

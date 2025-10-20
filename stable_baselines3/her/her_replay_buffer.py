@@ -61,6 +61,7 @@ class HerReplayBuffer(DictReplayBuffer):
         goal_selection_strategy: Union[GoalSelectionStrategy, str] = "future",
         copy_info_dict: bool = False,
         terminate_at_goal: bool = False,
+        terminate_at_goal_in_real: bool = False,
     ):
         super().__init__(
             buffer_size,
@@ -74,6 +75,7 @@ class HerReplayBuffer(DictReplayBuffer):
         self.env = env
         self.copy_info_dict = copy_info_dict
         self.terminate_at_goal = terminate_at_goal
+        self.terminate_at_goal_in_real = terminate_at_goal_in_real
 
         # convert goal_selection_strategy into GoalSelectionStrategy if string
         if isinstance(goal_selection_strategy, str):
@@ -308,16 +310,28 @@ class HerReplayBuffer(DictReplayBuffer):
         next_observations = {key: self.to_torch(obs) for key, obs in next_obs_.items()}
         # infos = {key: self.to_torch(info) for key, info in infos.items()}
 
+        # Only use dones that are not due to timeouts
+        # deactivated by default (timeouts is initialized as an array of False)
+        dones = self.dones[batch_indices, env_indices] * (1 - self.timeouts[batch_indices, env_indices])
+        rewards = self.rewards[batch_indices, env_indices]
+
+        if self.terminate_at_goal_in_real:
+            # add artificial termination to all goal states, to not warp Q
+            # based on sequences of goals
+            # should only matter if real rollouts don't terminate at goals
+            # here we assume positive rewards means it should terminate
+            new_dones = (rewards.flatten() > 0) * 1.0
+            dones = np.maximum(dones, new_dones)
+            # TODO replace with change in compute reward instead or not?
+
         return InfoDictReplayBufferSamples(
             observations=observations,
             actions=self.to_torch(self.actions[batch_indices, env_indices]),
             next_observations=next_observations,
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
-            dones=self.to_torch(
-                self.dones[batch_indices, env_indices] * (1 - self.timeouts[batch_indices, env_indices])
-            ).reshape(-1, 1),
-            rewards=self.to_torch(self._normalize_reward(self.rewards[batch_indices, env_indices].reshape(-1, 1), env)),
+            dones=self.to_torch(dones).reshape(-1, 1),
+            rewards=self.to_torch(self._normalize_reward(rewards.reshape(-1, 1), env)),
             infos=infos,
             batch_indices=batch_indices,
             env_indices=env_indices,

@@ -202,6 +202,12 @@ def train(base_path: str = "./data/wrapper/",
 
     print(options)
 
+    if reward_func == "term": # Add case for or restructure to handle exact match too
+        terminate_at_goal_in_real = False # not needed if real term
+    else:
+        terminate_at_goal_in_real = True
+    #terminate_at_goal_in_real = False # TODO temp override to test without
+
     # check existing experiments
     exp_paths = utils.get_all_folders(os.path.join(base_path, options))
 
@@ -366,9 +372,11 @@ def train(base_path: str = "./data/wrapper/",
 
             eval_env_goal = GoalWrapper(eval_env,
                                 goal_weight=goal_weight,
-                                goal_range=goal_range,
+                                goal_range=0.1, # TODO obs override added 9/10 2025
                                 goal_selection_strategies=goal_selection,
-                                reward_func=reward_func) # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
+                                reward_func="term") # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
+                                # TODO this should be changed for the goals that terminate externally
+                                # as they might terminate prematurely otherwise, giving wrong external reward
             eval_env = Monitor(eval_env_goal, eval_log_dir)
 
             eval_callback = EvalCallback(eval_env,
@@ -427,7 +435,7 @@ def train(base_path: str = "./data/wrapper/",
                                 goal_weight=goal_weight,
                                 goal_range=goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func=reward_func) # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
+                                reward_func="term") # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
         else:
             eval_env_goal = eval_env # TODO handle that this name becomes missleading
         eval_env = Monitor(eval_env_goal, eval_log_dir)
@@ -478,8 +486,9 @@ def train(base_path: str = "./data/wrapper/",
                        "replay_buffer_kwargs": dict(
                        n_sampled_goal=n_sampled_goal,
                        goal_selection_strategy="future",
-                       copy_info_dict=True, # TODO Turn off if not needed
-                       terminate_at_goal=True), # TODO make dependant on goal eval strat
+                       copy_info_dict=False, # TODO Turn off if not needed
+                       terminate_at_goal=True, # TODO make dependant on goal eval strat
+                       terminate_at_goal_in_real=terminate_at_goal_in_real,), # TODO make dependant on goal eval strat
                        }
         # if env_id == "CliffWalking-v0":
         #     algo_kwargs["replay_buffer_kwargs"]["handle_timeout_termination"] = True
@@ -512,6 +521,8 @@ def train(base_path: str = "./data/wrapper/",
                 seed=policy_seed,
                 device=device,
                 tensorboard_log=log_dir,
+                #exploration_initial_eps=0.1,
+                #exploration_final_eps=0.01,
     )
 
     #model.replay_buffer.her_ratio = 0
