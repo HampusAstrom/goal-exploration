@@ -92,7 +92,8 @@ class GoalWrapper(
         self.targeted_goals = []
         self.initial_targeted_goals = []
         self.local_targeted_goals = []
-        self.successful_goals = []
+        self.successful_goals = [] # what was the goal when successful?
+        self.success_obs = [] # what was the obs when successful?
         self.successful_goal_index = []
         self.steps_taken = 0
         self.num_timesteps = 0
@@ -276,6 +277,7 @@ class GoalWrapper(
         success = reward > 0
         if not isinstance(success, np.ndarray) and success: # this should only happen when running, not duing hindsight TODO
             self.successful_goals.append(self.goal)
+            self.success_obs.append(achieved_goal) # keep assuming this is in obs format
             self.successful_goal_index.append(len(self.targeted_goals)-1)
         ret = success * 1
         return ret, success, success
@@ -633,6 +635,7 @@ class GridNoveltySelection():
         # grids tracking targeted goals
         self.targeted = np.zeros(shape=self.shape, dtype=int)
         self.succeded = np.zeros(shape=self.shape, dtype=int)
+        self.succeded_obs = np.zeros(shape=self.shape, dtype=int) # obs can be in different cell due to range
         self.latest_targeted = np.zeros(shape=self.shape, dtype=int)
         self.latest_succeded = np.zeros(shape=self.shape, dtype=int)
 
@@ -765,6 +768,7 @@ class GridNoveltySelection():
 
         with np.errstate(divide='ignore', invalid='ignore'):
             success_rate = self.succeded/self.targeted
+            # TODO make alternative based succeded_obs instead? also swap if above then
 
         if isinstance(self.target_success_rate, float):
             dist = np.abs(success_rate - self.target_success_rate)
@@ -814,6 +818,7 @@ class GridNoveltySelection():
             else:
                 goal_cell = self.point2cell(goal)
             self.succeded[goal_cell] += 1
+            self.succeded_obs[obs_cell] += 1
             self.latest_succeded[goal_cell] = self.curr_step
 
         # TODO add success/fail streak update if we track it

@@ -621,6 +621,8 @@ def train(base_path: str = "./data/wrapper/",
                    goal_selection.targeted)
         np.savetxt(os.path.join(base_path, options, experiment,"n_succeded"),
                    goal_selection.succeded)
+        np.savetxt(os.path.join(base_path, options, experiment,"n_succeded_obs"),
+                   goal_selection.succeded_obs)
         np.savetxt(os.path.join(base_path, options, experiment,"n_latest_targeted"),
                    goal_selection.latest_targeted)
         np.savetxt(os.path.join(base_path, options, experiment,"n_latest_succeded"),
@@ -649,11 +651,13 @@ def train(base_path: str = "./data/wrapper/",
         targeted_goals = stack(train_env_goal.targeted_goals)
         initial_targeted_goals = stack(train_env_goal.initial_targeted_goals)
         successful_goals = stack(train_env_goal.successful_goals)
+        success_obs = stack(train_env_goal.success_obs)
         successful_goal_index = stack(train_env_goal.successful_goal_index)
         local_targeted_goals = stack(train_env_goal.local_targeted_goals)
         np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
         np.savetxt(os.path.join(base_path, options, experiment,"initial_targeted_goals"), initial_targeted_goals)
         np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_obs_spread"), success_obs)
         np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_index"), successful_goal_index)
         np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
 
@@ -674,6 +678,10 @@ def train(base_path: str = "./data/wrapper/",
                                     coord_names,
                                     os.path.join(base_path, options, experiment),
                                     figname="successful_goal_spread")
+            utils.plot_targeted_goals(success_obs,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment),
+                                    figname="successful_goal_obs_spread")
 
 #model.load(model_path, eval_env)
 
