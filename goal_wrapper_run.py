@@ -26,6 +26,13 @@ from goal_wrapper import GoalWrapper, FiveXGoalSelection, OrderedGoalSelection, 
 from sparse_pendulum import SparsePendulumEnv
 from pathological_mc import PathologicalMountainCarEnv
 
+def stack(arrays, axis=0, out=None, *, dtype=None, casting="same_kind"):
+    arrays_test = [np.asanyarray(arr) for arr in arrays]
+    if not arrays_test:
+        return np.array([[]])
+    else:
+        return np.stack(arrays, axis, out, dtype=None, casting="same_kind")
+
 class MapGoalComponentsCallback(BaseCallback):
     def __init__(self, log_path, eval_points, dimension_names, eval_freq, goal_selector, verbose=0):
         super(MapGoalComponentsCallback, self).__init__(verbose)
@@ -198,7 +205,7 @@ def train(base_path: str = "./data/wrapper/",
     #options += "_her_episode_gradually_reduce_hindsight_from_0.8_to_0"
     #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net_exploration_fraction0.5_more_novelty_focus"
     #options += "_batch_size512_train_freq512_lr_1e-3_3x256net"#_more_novelty_focus"
-    options += "_batch_size512_lr_1e-3_2x256net" # _0.1-0.01_epsilonexplore #4x256resblock-x4net" #_no_term_in_real"
+    options += "_batch_size512_lr_1e-3_2x256net" #_0_epsilonexplore" # _0.1-0.01_epsilonexplore #_goalpos[-1.70,-0.02],[0.6,0.02,]"
 
     print(options)
 
@@ -206,7 +213,6 @@ def train(base_path: str = "./data/wrapper/",
         terminate_at_goal_in_real = False # not needed if real term
     else:
         terminate_at_goal_in_real = True
-    #terminate_at_goal_in_real = False # TODO temp override to test without
 
     # check existing experiments
     exp_paths = utils.get_all_folders(os.path.join(base_path, options))
@@ -298,15 +304,15 @@ def train(base_path: str = "./data/wrapper/",
         if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
-        fixed_goal = lambda obs: np.array([-1.60, 0.00,])
+        fixed_goal = lambda obs: np.array([-1.70, -0.02,])
         few_goals = [fixed_goal,
-                     lambda obs: np.array([0.5, 0.00,])]
+                     lambda obs: np.array([0.6, 0.02,])]
         many_goals = few_goals.copy()
         many_goals += [lambda obs: np.array([-0.5, 0.04,]),
                        lambda obs: np.array([-0.5, -0.04,]),
                        lambda obs: np.array([-0.7, 0.0,])]
-        max_goals = [[-1.60, 0.00,],
-                     [0.5, 0.00,],
+        max_goals = [[-1.70, -0.02,],
+                     [0.6, 0.02,],
                      [-0.5, 0.04,],
                      [-0.5, -0.04,],
                      [-0.7, 0.0,],
@@ -369,14 +375,17 @@ def train(base_path: str = "./data/wrapper/",
             goal_selector = FixedGoalSelection(goal)
             goal_selection = goal_selector.select_goal
             goal_weight=1
+            eval_goal_range=0.1
 
             eval_env_goal = GoalWrapper(eval_env,
                                 goal_weight=goal_weight,
-                                goal_range=0.1, # TODO obs override added 9/10 2025
+                                goal_range=eval_goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func="term") # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
-                                # TODO this should be changed for the goals that terminate externally
-                                # as they might terminate prematurely otherwise, giving wrong external reward
+                                reward_func="term")
+                                # TODO this will capture when goals are reached according to own metric
+                                # but will miss when goals are "failed" because of external termination
+                                # even when that termination is for the goal we aim to care for, so
+                                # goal_range should not be too small here, so that does not happen
             eval_env = Monitor(eval_env_goal, eval_log_dir)
 
             eval_callback = EvalCallback(eval_env,
@@ -414,15 +423,21 @@ def train(base_path: str = "./data/wrapper/",
             goal_selection = goal_selector.select_goal
             goal_weight=1
             n_eval_episodes=goal_selector.len
+            reward_func="term"
+            eval_goal_range=0.1
         if eval_type == "many":
             goal_selector = OrderedGoalSelection(many_goals)
             goal_selection = goal_selector.select_goal
             goal_weight=1
             n_eval_episodes=goal_selector.len
+            reward_func="term"
+            eval_goal_range=0.1
         if eval_type == "fixed":
             goal_selection = fixed_goal
             goal_weight=0
             n_eval_episodes=5
+            reward_func="reselect" # to make sure we don't terminate early when going for external reward
+            eval_goal_range=0.0001
 
 
         # for eval we want to always evaluate with the goal at the top
@@ -433,9 +448,12 @@ def train(base_path: str = "./data/wrapper/",
             # only evaluate with goal when training with goal
             eval_env_goal = GoalWrapper(eval_env,
                                 goal_weight=goal_weight,
-                                goal_range=goal_range,
+                                goal_range=eval_goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func="term") # "term" TODO OBS CHANGED HERE!!!!!!!!!!!!!!
+                                reward_func=reward_func)
+                                # for goal_weight 1 cases goal_range should probably not be too small
+                                # for goal_weight 0 cases goal_range should probably be small if we
+                                # just look for external reward, ideally tiny
         else:
             eval_env_goal = eval_env # TODO handle that this name becomes missleading
         eval_env = Monitor(eval_env_goal, eval_log_dir)
@@ -459,17 +477,10 @@ def train(base_path: str = "./data/wrapper/",
 
     eval_callback = setup_eval("fixed")
     # TODO replace all these checks with non-listed logic
-    if baseline_override != "base-rl" and True:
+    if baseline_override != "base-rl":
         clist = setup_evalcallbacks_from_goal_list(max_goals, n_eval_episodes=1)
         clist.append(eval_callback)
         eval_callbacks = clist
-    elif baseline_override in [None, "uniform-goal", "grid-novelty"]:
-        eval_callback_few = setup_eval("few")
-        eval_callback_many = setup_eval("many")
-        eval_callbacks = [eval_callback,
-                          eval_callback_few,
-                          eval_callback_many]
-        # TODO this is a bit inefficient, we could gain speed
     else:
         eval_callbacks = [eval_callback]
 
@@ -495,9 +506,6 @@ def train(base_path: str = "./data/wrapper/",
     else:
         policy = "MlpPolicy"
         algo_kwargs = {}
-    # TODO change here from Her buffer or just run without
-    # without goal conditioning (but still truncated and hardstart)
-    # could hack compute reward but that is probably just confusing
     batch_size = 512
     model = algo(policy,
                 train_env,
@@ -521,8 +529,8 @@ def train(base_path: str = "./data/wrapper/",
                 seed=policy_seed,
                 device=device,
                 tensorboard_log=log_dir,
-                #exploration_initial_eps=0.1,
-                #exploration_final_eps=0.01,
+                #exploration_initial_eps=0,
+                #exploration_final_eps=0,
     )
 
     #model.replay_buffer.her_ratio = 0
@@ -599,38 +607,6 @@ def train(base_path: str = "./data/wrapper/",
     model_path = os.path.join(base_path, options, experiment, 'model')
     model.save(model_path)
 
-    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
-        targeted_goals = np.stack(train_env_goal.targeted_goals)
-        initial_targeted_goals = np.stack(train_env_goal.initial_targeted_goals)
-        successful_goals = np.stack(train_env_goal.successful_goals)
-        successful_goal_index = np.stack(train_env_goal.successful_goal_index)
-        np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
-        np.savetxt(os.path.join(base_path, options, experiment,"initial_targeted_goals"), initial_targeted_goals)
-        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
-        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_index"), successful_goal_index)
-
-        if len(train_env_goal.local_targeted_goals) > 0:
-            local_targeted_goals = np.stack(train_env_goal.local_targeted_goals)
-            np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
-
-        if len(targeted_goals.shape) > 1: # requires goals tracked in more than one dim to plot this way
-            utils.plot_targeted_goals(targeted_goals,
-                                    coord_names,
-                                    os.path.join(base_path, options, experiment))
-            utils.plot_targeted_goals(initial_targeted_goals,
-                                    coord_names,
-                                    os.path.join(base_path, options, experiment),
-                                    figname="ep_start_goal_spread")
-            if len(train_env_goal.local_targeted_goals) > 0:
-                utils.plot_targeted_goals(local_targeted_goals,
-                                        coord_names,
-                                        os.path.join(base_path, options, experiment),
-                                        figname="reselect_goal_spread")
-            utils.plot_targeted_goals(successful_goals,
-                                    coord_names,
-                                    os.path.join(base_path, options, experiment),
-                                    figname="successful_goal_spread")
-
     if baseline_override in ["grid-novelty"]:
         np.savetxt(os.path.join(base_path, options, experiment,"n_shape"),
                    goal_selection.shape)
@@ -667,6 +643,37 @@ def train(base_path: str = "./data/wrapper/",
             fp.write('eval_logs 5\n')
         elif env_id == "CliffWalking-v0":
             fp.write('eval_logs 5\n')
+
+    if baseline_override in [None, "uniform-goal", "grid-novelty"]:
+        a = stack([])
+        targeted_goals = stack(train_env_goal.targeted_goals)
+        initial_targeted_goals = stack(train_env_goal.initial_targeted_goals)
+        successful_goals = stack(train_env_goal.successful_goals)
+        successful_goal_index = stack(train_env_goal.successful_goal_index)
+        local_targeted_goals = stack(train_env_goal.local_targeted_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"goals"), targeted_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"initial_targeted_goals"), initial_targeted_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_spread"), successful_goals)
+        np.savetxt(os.path.join(base_path, options, experiment,"successful_goal_index"), successful_goal_index)
+        np.savetxt(os.path.join(base_path, options, experiment,"reselect_goal_spread"), local_targeted_goals)
+
+        if len(targeted_goals.shape) > 1: # requires goals tracked in more than one dim to plot this way
+            utils.plot_targeted_goals(targeted_goals,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment))
+            utils.plot_targeted_goals(initial_targeted_goals,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment),
+                                    figname="ep_start_goal_spread")
+            if len(train_env_goal.local_targeted_goals) > 0:
+                utils.plot_targeted_goals(local_targeted_goals,
+                                        coord_names,
+                                        os.path.join(base_path, options, experiment),
+                                        figname="reselect_goal_spread")
+            utils.plot_targeted_goals(successful_goals,
+                                    coord_names,
+                                    os.path.join(base_path, options, experiment),
+                                    figname="successful_goal_spread")
 
 #model.load(model_path, eval_env)
 
@@ -763,7 +770,7 @@ if __name__ == '__main__':
     #                         "norm_comps": [True],
     #                         }
     goal_conf_to_permute = {"grid_size": [100],
-                            "fraction_random": [0.1],
+                            "fraction_random": [0.01],
                             #"target_success_rate": [0.75], # turn on if intermediate instead of novelty # 0.75
                             "dist_decay": [2],
                             }
@@ -798,7 +805,7 @@ if __name__ == '__main__':
                          "device": ["cuda"],
                          "steps": [10_000_000], # 10_000_000 pmc default
                          "goal_weight": [1.0],
-                         "goal_range": [0.01],
+                         "goal_range": [0.0001],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
                          "reward_func": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms

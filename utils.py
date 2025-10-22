@@ -81,7 +81,8 @@ def weight_combinations(weights, num):
     return configurations
 
 def plot_targeted_goals(goals, coord_names, path, figname="goal_spread"):
-    assert len(coord_names) == len(goals[1,:])
+    if len(coord_names) != len(goals[0,:]):
+        return
     order = np.linspace(0, 1, len(goals))
 
     fig = plt.figure(figsize=(2*len(coord_names), 2*len(coord_names)))
@@ -280,7 +281,7 @@ def plot_each_goal_in_exp(path,
                           window,
                           n_eval = 1,
                           lst=["eval_logs", "train_logs"],
-                          put_last = ['[-1.6, 0.0]', '[5.0, 0.0]'],
+                          put_last = ['[-1.7, -0.02]', '[0.5, 0.02]'],
                           exclude=True,
                           func=None,
                           figname=None):
@@ -345,7 +346,7 @@ def plot_each_goal_in_exp(path,
         label = name.replace("eval_logs_","")
         label = label.replace("[","(")
         label = label.replace("]",")")
-        if "(-1.6" in label: # hardcoded override
+        if "(-1.7" in label: # hardcoded override
             label += " hard ext. goal"
         if "(0.5" in label: # hardcoded override
             label += " easy ext. goal"
@@ -564,7 +565,7 @@ if __name__ == '__main__':
         thresh = 11
         symlog_y = False
         n_eval = 1
-        put_last = ['[-1.6, 0.0]', '[0.5, 0.0]']
+        put_last = ['[-1.7, -0.02]', '[0.6, 0.02]']
     elif "Cliff" in folder:
         eval_freq = 50000
         thresh = -14.0
