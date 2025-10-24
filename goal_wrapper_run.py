@@ -127,6 +127,7 @@ def train(base_path: str = "./data/wrapper/",
           device = None,
           goal_selection_params: dict = None,
           reward_func: str = "term",
+          range_as_goal: bool = False,
           env_params: dict = None,
           env_id = "PathologicalMountainCar-v1.1",
           buffer_size = int(1e6),
@@ -153,6 +154,7 @@ def train(base_path: str = "./data/wrapper/",
     # Collect variables to store in json before cluttered
     conf_params = locals()
 
+    # TODO clean up this mess
     if baseline_override in [None, "grid-novelty"]:
         options = str(steps) + "steps_" \
                 + str(goal_weight) + "goalrewardWeight_" \
@@ -174,9 +176,13 @@ def train(base_path: str = "./data/wrapper/",
                 + str(goal_range) + "goal_range_" \
                 + str(reward_func) + "-reward_func_" \
                 + baseline_override + "-baseline"
-    if baseline_override in ["base-rl", "curious"]:
+
+    if baseline_override in ["base-rl", "curious"]: # non-goal
         options = str(steps) + "steps_" \
                 + baseline_override + "-baseline"
+    else:                                           # shared goal additions
+        if range_as_goal:
+            options += "_rangeGoal"
 
     if buffer_size != int(1e6): # if not default
         options += "_" + str(buffer_size) + "buffer_size"
@@ -280,7 +286,9 @@ def train(base_path: str = "./data/wrapper/",
         train_env_goal = GoalWrapper(train_env,
                                      goal_weight=goal_weight,
                                      goal_range=goal_range,
-                                     reward_func=reward_func)
+                                     reward_func=reward_func,
+                                     range_as_goal=range_as_goal,
+                                     )
                                      #intrinsic_curiosity_module=ICM(train_env,
                                      #                               device))
     else:
@@ -324,6 +332,11 @@ def train(base_path: str = "./data/wrapper/",
                      [0.3, 0.05],
                      [0.3, -0.02],
                      ]
+        if range_as_goal:
+            fixed_goal = lambda obs: np.array([-1.70, -0.07, -1.60, 0.0,])
+            max_goals = [[-1.70, -0.07, -1.60, 0.0,],
+                         [0.5, 0.0, 0.6, 0.07,],
+            ]
         coord_names = ["xpos", "velocity"]
         # algo = DQN
         algo = DQNwithICM
@@ -381,7 +394,9 @@ def train(base_path: str = "./data/wrapper/",
                                 goal_weight=goal_weight,
                                 goal_range=eval_goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func="term")
+                                reward_func="term",
+                                range_as_goal=range_as_goal,
+                                )
                                 # TODO this will capture when goals are reached according to own metric
                                 # but will miss when goals are "failed" because of external termination
                                 # even when that termination is for the goal we aim to care for, so
@@ -450,7 +465,9 @@ def train(base_path: str = "./data/wrapper/",
                                 goal_weight=goal_weight,
                                 goal_range=eval_goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func=reward_func)
+                                reward_func=reward_func,
+                                range_as_goal=range_as_goal,
+                                )
                                 # for goal_weight 1 cases goal_range should probably not be too small
                                 # for goal_weight 0 cases goal_range should probably be small if we
                                 # just look for external reward, ideally tiny
@@ -516,7 +533,7 @@ def train(base_path: str = "./data/wrapper/",
                 learning_rate=1e-3,
                 gamma=0.95,
                 batch_size=batch_size,
-                train_freq=int(batch_size/t2g),
+                train_freq=max(int(batch_size/t2g), 1),
                 #exploration_fraction=1.0,
                 #target_update_interval=1000,
                 #gradient_steps=-1,
@@ -647,7 +664,6 @@ def train(base_path: str = "./data/wrapper/",
             fp.write('eval_logs 5\n')
 
     if baseline_override in [None, "uniform-goal", "grid-novelty"]:
-        a = stack([])
         targeted_goals = stack(train_env_goal.targeted_goals)
         initial_targeted_goals = stack(train_env_goal.initial_targeted_goals)
         successful_goals = stack(train_env_goal.successful_goals)
@@ -819,6 +835,7 @@ if __name__ == '__main__':
                          "reward_func": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
                          "buffer_size": [10_000_000],
                          "baseline_override": ["uniform-goal"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
+                         "range_as_goal": [True], # only works with uniform goal selection for now
                          #"algo_override": [PPO],
                          "n_sampled_goal": [4],
                          "t2g_ratio": [(1, "her")], #first part ratio, last "raw" if raw or "her" on top of her ratio

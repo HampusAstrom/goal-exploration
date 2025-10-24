@@ -2,10 +2,11 @@ import gymnasium as gym
 import numpy as np
 import scipy
 from itertools import product
+from collections import OrderedDict
 
 from gymnasium import error, logger
 from gymnasium.core import ActType, ObsType
-from gymnasium.spaces.utils import flatten, flatdim
+from gymnasium.spaces.utils import flatten, flatdim, flatten_space, unflatten
 from gymnasium import spaces
 import utils
 
@@ -32,17 +33,18 @@ class GoalWrapper(
             reward_func = None, # TODO make type hint with Callable
             goal_selection_strategies = None, # TODO make type hint with Callable
             goal_sel_strat_weight = None,
-            # env: gym.Env[ObsType, ActType],
+            range_as_goal = False,
     ):
         gym.utils.RecordConstructorArgs.__init__(
             self,
             goal_weight=goal_weight,
-        )
+        ) # TODO do I use this? should it have all all (kw)args then?
         gym.Wrapper.__init__(self, env)
 
         assert goal_weight >=0 and goal_weight <= 1
         self.goal_weight = goal_weight
         self.goal_range = goal_range
+        self.range_as_goal = range_as_goal
         # for now this only supports flattenable observation spaces
         assert self.env.observation_space.is_np_flattenable
         # TODO this supports inputing a reward function from the outside, but we should
@@ -51,6 +53,7 @@ class GoalWrapper(
             self.goal_reward = self.flatten_norm_reward
         # TODO unsure how to point to own method at creation, use strings for now
         elif reward_func == "term":
+            # TODO I should split so that terminating is a separate option to reward eval
             self.goal_reward = self.terminating_binary_norm_reward
         elif reward_func == "reselect":
             self.goal_reward = self.reselecting_binary_norm_reward
@@ -66,6 +69,13 @@ class GoalWrapper(
 
         if not reward_func == "exact_goal_match_reward":
             self.obs_scale = self.get_obs_norm()
+            self.local_reselect = False
+
+        # TODO sort out goal eval from goal rep and goal termination
+        # for now this just overrides goal_reward aka goal_evaluation funtion
+        # if we have range_as_goal
+        if self.range_as_goal:
+            self.goal_reward = self.in_range_reward
 
         self.selection_strategies = None
         self.strat_weights = None
@@ -80,11 +90,32 @@ class GoalWrapper(
                                              "achieved_goal": self.env.observation_space,
                                              "desired_goal": self.env.observation_space})
 
+        # TODO sort out how to handle goal selection when other range type
+        # since we often call set_goal_strategies in script, hard override here
+        # but we can add minor change to get some to work when range_as_goal
+        if self.range_as_goal == True:
+            # new_obs = OrderedDict([("observation", self.env.observation_space),
+            #                        ("achieved_goal", self.env.observation_space),
+            #                        ("desired_goal",
+            #                             spaces.Dict([("high", self.env.observation_space),
+            #                              ("low", self.env.observation_space)])
+            #                         )
+            #                        ]
+            #                     )
+            # new_observation_space = spaces.Dict(new_obs)
+            self.desired_goal_space = spaces.Dict({"upper_bound": self.env.observation_space,
+                                                   "lower_bound": self.env.observation_space})
+            desired_goal_space = flatten_space(self.desired_goal_space)
+            new_observation_space = spaces.Dict({"observation": self.env.observation_space,
+                                                "achieved_goal": self.env.observation_space,
+                                                "desired_goal": desired_goal_space})
+
         # TODO determine if I should replace this with inheriting TransformObservation
         # and calling its constructor here
         # If so I should probably do the same for reward
         self.observation_space = new_observation_space
         self.goal_dim = flatdim(self.observation_space["desired_goal"])
+        self.shape = self.env.observation_space.shape # is this just same as above when flat?
 
         # create variables that track seen and targeted goals
         # seen goals can maybe just we replay buffer from policy algorithm
@@ -158,9 +189,12 @@ class GoalWrapper(
                        desired_goal,
                        info,
                        ):
+        # This should only be used by HER, so assume batch of obs to be turned into goals
+        # The solution here did not work, since we want to know more about desired_goal
+        # if self.range_as_goal:
+        #     desired_goal = self.transition_to_goal_range(achieved_goal, desired_goal)
+
         # get goal conditioned reward
-        # TODO now that we added termination from goal eval, we need to handle
-        # it. For now it is ignored when doing hindsight, might be a problem
         goal_reward, _, _ = self.goal_reward(achieved_goal, desired_goal, info)
         gw = self.goal_weight
         # TODO add intrinsic reaward here, unless already added by lower wrapper?
@@ -204,7 +238,21 @@ class GoalWrapper(
         return h - l
 
     def sample_obs_goal(self, obs = None):
+        # this is the same as self.observation_space in the point case
         obs_space = self.env.observation_space
+
+        if self.range_as_goal: # TODO this version will often have current obs in range, fix
+            # TODO check if this is much faster if not unflattening and flattening
+            # TODO this will often be successfull at start, needs might adjustment
+            # to make sure obs is not in range?
+            sample = self.observation_space.sample()["desired_goal"]
+            sample = unflatten(self.desired_goal_space, sample)
+            # make sure high is high, and low is low
+            high = np.maximum(sample["upper_bound"], sample["lower_bound"])
+            low  = np.minimum(sample["upper_bound"], sample["lower_bound"])
+            sample["upper_bound"] = high
+            sample["lower_bound"] = low
+            return flatten(self.desired_goal_space, sample)
 
         # first trivial goal selection (uniform/default in obs space)
         return obs_space.sample()
@@ -228,6 +276,7 @@ class GoalWrapper(
             terminate = np.full_like(success, False)
         if not isinstance(success, np.ndarray) and success: # this should only happen during rollout, not duing hindsight TODO
             self.successful_goals.append(self.goal)
+            # TODO handle non-point goals for discrete environments
             self.successful_goal_index.append(len(self.targeted_goals)-1)
         return ret, terminate, success
 
@@ -248,6 +297,7 @@ class GoalWrapper(
 
         flat_achi = flatten(self.env.observation_space, achieved_goal_normed)
         flat_goal = flatten(self.env.observation_space, desired_goal_normed)
+        # TODO the second part of if bellow seems scetchy, should look to self.shape?
         if isinstance(achieved_goal_normed, np.ndarray) and achieved_goal_normed.ndim == 2: # handle batch
             flat_achi = flat_achi.reshape(-1, self.goal_dim)
             flat_goal = flat_goal.reshape(-1, self.goal_dim)
@@ -328,6 +378,77 @@ class GoalWrapper(
                 break
 
         return goal
+
+    def in_range_reward(self,
+                        achieved_goal,
+                        desired_goal,
+                        info,
+                        ):
+        desired_goal = np.atleast_2d(desired_goal)
+        # goal = unflatten(self.desired_goal_space, desired_goal)
+        # success = (achieved_goal <= goal["upper_bound"]).all() and \
+        #           (achieved_goal >= goal["lower_bound"]).all()
+        under_upper = achieved_goal <= desired_goal[...,-int(self.goal_dim/2):]
+        over_lower  = achieved_goal >= desired_goal[...,:int(self.goal_dim/2)]
+        success = np.logical_and(under_upper, over_lower).all(axis=1)
+
+        reward = success * 1
+        if len(success) == 1 and success: # this should only happen during rollout, not duing hindsight TODO
+            self.successful_goals.append(self.goal)
+            self.success_obs.append(achieved_goal)
+            self.successful_goal_index.append(len(self.targeted_goals)-1)
+            # TODO this assumes reselect for now
+            if self.local_reselect: # TODO this version does not exist right now
+                self.goal = self.select_local_goal(achieved_goal) # assumes goal is obs for now
+            else:
+                self.goal = self.select_goal(achieved_goal) # assumes goal is obs for now
+            self.targeted_goals.append(self.goal)
+            self.local_targeted_goals.append(self.goal)
+        return reward, False, success
+
+    def transition_to_goal_range(self, obs, next_obs):
+        # we need to make sure that the goal we define is not achieved with obs
+        # but achieved with next_obs, so at least one dim of obs must be outside
+        # of the selected range
+
+        # lets try to produce some points to constrain
+        # make sure upper an lower for each is in right order
+        top = np.random.uniform(next_obs, self.env.observation_space.high)
+        bot = np.random.uniform(self.env.observation_space.low, next_obs)
+
+        # sanity check
+        # next_in_mid = np.logical_and(top >= next_obs, next_obs >= bot)
+        # print(next_in_mid)
+
+        # for each dim (and sample), find out in what direction obs->next_obs steps
+        diff = next_obs - obs
+
+        indices = (diff != 0)
+        # TODO handle if structure under top level is multi dim, flatten or something
+
+        # select one non-zero dim in each row (sample), where obs does not qualify
+        mask = np.zeros_like(obs)
+        for i, row in enumerate(indices):
+            options = np.argwhere(row)
+            if len(options) == 0:
+                continue
+            ind = np.random.choice(options.flatten())
+            mask[i][ind] = 1
+
+        # when we trim a dim so obs doesn't qualify for the goal
+        # we must trim top when new_obs is lower, and bot otherwise
+        top_mask = np.logical_and(mask, -diff>0)
+        bot_mask = np.logical_and(mask, diff>0)
+
+        # set other val to either next_obs, or some val between obs and next_obs
+        # trim value can be anything (obs, next_obs], we just do next_obs for now
+        top[top_mask] = next_obs[top_mask]
+        bot[bot_mask] = next_obs[bot_mask]
+
+        ret = np.concatenate((bot, top), axis=1)
+
+        # NOTE in return we should have all a row of [low high] each
+        return ret
 
 class FixedGoalSelection():
     def __init__(self,

@@ -467,6 +467,18 @@ class HerReplayBuffer(DictReplayBuffer):
             raise ValueError(f"Strategy {self.goal_selection_strategy} for sampling goals not supported!")
 
         transition_indices = (transition_indices_in_episode + batch_ep_start) % self.buffer_size
+
+        # TODO replace with something less hacky if possible
+        if self.env.get_attr("range_as_goal")[0]:
+            # If goals are ranges, not just points, we need to translate a point
+            # from the episode to a range instead. In that case we should make
+            # sure that 1) the goal is achieved in the end of them transition
+            # 2) the goal is not achieved in the beginning of the transition
+            obs = self.observations["achieved_goal"][transition_indices, env_indices]
+            next_obs = self.next_observations["achieved_goal"][transition_indices, env_indices]
+            func = self.env.get_attr("transition_to_goal_range")[0]
+            return func(obs, next_obs)
+
         return self.next_observations["achieved_goal"][transition_indices, env_indices]
 
     def truncate_last_trajectory(self) -> None:
