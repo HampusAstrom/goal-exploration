@@ -220,6 +220,11 @@ def train(base_path: str = "./data/wrapper/",
     else:
         terminate_at_goal_in_real = True
 
+    if baseline_override == "grid-novelty" and range_as_goal:
+        # when using ranges as goals and goal selection methods that
+        # select points, use this to turn those goals into ranges
+        wrap_for_range = True
+
     # check existing experiments
     exp_paths = utils.get_all_folders(os.path.join(base_path, options))
 
@@ -288,6 +293,7 @@ def train(base_path: str = "./data/wrapper/",
                                      goal_range=goal_range,
                                      reward_func=reward_func,
                                      range_as_goal=range_as_goal,
+                                     wrap_for_range=wrap_for_range,
                                      )
                                      #intrinsic_curiosity_module=ICM(train_env,
                                      #                               device))
@@ -834,7 +840,7 @@ if __name__ == '__main__':
                          "env_params": named_permutations(env_params),
                          "reward_func": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
                          "buffer_size": [10_000_000],
-                         "baseline_override": ["uniform-goal"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
+                         "baseline_override": ["grid-novelty"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
                          "range_as_goal": [True], # only works with uniform goal selection for now
                          #"algo_override": [PPO],
                          "n_sampled_goal": [4],

@@ -34,6 +34,7 @@ class GoalWrapper(
             goal_selection_strategies = None, # TODO make type hint with Callable
             goal_sel_strat_weight = None,
             range_as_goal = False,
+            wrap_for_range = False,
     ):
         gym.utils.RecordConstructorArgs.__init__(
             self,
@@ -45,6 +46,7 @@ class GoalWrapper(
         self.goal_weight = goal_weight
         self.goal_range = goal_range
         self.range_as_goal = range_as_goal
+        self.wrap_for_range = wrap_for_range
         # for now this only supports flattenable observation spaces
         assert self.env.observation_space.is_np_flattenable
         # TODO this supports inputing a reward function from the outside, but we should
@@ -84,7 +86,10 @@ class GoalWrapper(
         elif isinstance(goal_selection_strategies, list):
             self.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
         else:
-            self.select_goal = goal_selection_strategies
+            if self.wrap_for_range:
+                self.select_goal = self.wrap_for_goal_range(goal_selection_strategies)
+            else:
+                self.select_goal = goal_selection_strategies
 
         new_observation_space = spaces.Dict({"observation": self.env.observation_space,
                                              "achieved_goal": self.env.observation_space,
@@ -216,7 +221,10 @@ class GoalWrapper(
             self.strat_weights = [1]*len(goal_selection_strategies)
         else:
             self.strat_weights = goal_sel_strat_weight
-        self.select_goal = self.multi_strat_goal_selection
+        if self.wrap_for_range:
+            self.select_goal = self.wrap_for_goal_range(self.multi_strat_goal_selection)
+        else:
+            self.select_goal = self.multi_strat_goal_selection
         self.goal_selector_obj = goal_selector_obj # TODO replace with less messy linkup, overhaul
 
     def link_buffer(self, buffer):
@@ -241,7 +249,7 @@ class GoalWrapper(
         # this is the same as self.observation_space in the point case
         obs_space = self.env.observation_space
 
-        if self.range_as_goal: # TODO this version will often have current obs in range, fix
+        if self.range_as_goal and False: # TODO this version will often have current obs in range, fix
             # TODO check if this is much faster if not unflattening and flattening
             # TODO this will often be successfull at start, needs might adjustment
             # to make sure obs is not in range?
@@ -254,8 +262,29 @@ class GoalWrapper(
             sample["lower_bound"] = low
             return flatten(self.desired_goal_space, sample)
 
+        if self.range_as_goal:
+            # lets just reuse the obs to goal_range method
+            # this way we select a new obs, and select a goal that it
+            # qualifies for, while the current obs does not
+            target_goal = obs_space.sample()
+            return self.transition_to_goal_range(obs, target_goal)
+
         # first trivial goal selection (uniform/default in obs space)
         return obs_space.sample()
+
+    def wrap_for_goal_range(self, goal_point_func):
+        # TODO this should check and do passthough if the goal function already
+        # creates goals
+        # TODO temp override
+        def point2range(obs=None):
+            goal_point = goal_point_func(obs)
+            goal_range = self.transition_to_goal_range(obs, goal_point)
+            return goal_range
+
+        if self.wrap_for_range:
+            return point2range
+        else:
+            return goal_point_func
 
     def multi_strat_goal_selection(self, obs = None):
         strat = self.np_random.choice(self.selection_strategies, p=self.strat_weights)
@@ -411,6 +440,11 @@ class GoalWrapper(
         # but achieved with next_obs, so at least one dim of obs must be outside
         # of the selected range
 
+        # make sure it works for both single obs and vectors of obs
+        obs_dims = obs.ndim
+        obs = np.atleast_2d(obs)
+        next_obs = np.atleast_2d(next_obs)
+
         # lets try to produce some points to constrain
         # make sure upper an lower for each is in right order
         top = np.random.uniform(next_obs, self.env.observation_space.high)
@@ -448,6 +482,8 @@ class GoalWrapper(
         ret = np.concatenate((bot, top), axis=1)
 
         # NOTE in return we should have all a row of [low high] each
+        if obs_dims == 1:
+            ret = ret[0]
         return ret
 
 class FixedGoalSelection():
@@ -934,12 +970,14 @@ class GridNoveltySelection():
 
         # track goal success here, goal targeting when selecting
         if success:
+            self.succeded_obs[obs_cell] += 1
             if self.discrete_obs:
                 goal_cell = goal # do I need to do one-hot conversion here?
             else:
+                if goal.shape != obs.shape:
+                    return
                 goal_cell = self.point2cell(goal)
             self.succeded[goal_cell] += 1
-            self.succeded_obs[obs_cell] += 1
             self.latest_succeded[goal_cell] = self.curr_step
 
         # TODO add success/fail streak update if we track it
