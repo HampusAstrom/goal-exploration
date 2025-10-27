@@ -98,18 +98,22 @@ def plot_targeted_goals(goals, coord_names, path, figname="goal_spread"):
         ax = fig.add_subplot(len(coord_names)-1, len(coord_names)-1, i+1)
         # add markers for goal areas
         # TODO hardcoded override for patho MC
-        ax.fill_between([0, 0.07], [0.63, 0.63], [0.5, 0.5],
+        # ax.fill_between([0, 0.07], [0.63, 0.63], [0.5, 0.5],
+        #                 alpha=0.5, fc="salmon", ec="red")
+        ax.fill_between([0.5, 0.63], [0, 0], [0.07, 0.07],
                         alpha=0.5, fc="salmon", ec="red")
-        ax.fill_between([-0.07, 0], [-1.6, -1.6], [-1.73, -1.73],
+        # ax.fill_between([-0.07, 0], [-1.6, -1.6], [-1.73, -1.73],
+        #                 alpha=0.5, fc="gold", ec="goldenrod")
+        ax.fill_between([-1.73, -1.6], [-0.07, -0.07], [0, 0],
                         alpha=0.5, fc="gold", ec="goldenrod")
 
-        im = ax.scatter(goals[:,col+1], goals[:,row], c=order, s=1)
+        im = ax.scatter(goals[:,col], goals[:,row+1], c=order, s=1)
         if row == 0:
-            ax.set_xlabel(coord_names[col+1])
+            ax.set_xlabel(coord_names[col])
         else:
             ax.set_xticks([])
         if col == len(coord_names)-2:
-            ax.set_ylabel(coord_names[row])
+            ax.set_ylabel(coord_names[row+1])
         else:
             ax.set_yticks([])
         ax.xaxis.tick_top()
@@ -525,7 +529,7 @@ def plot_all_in_folder(dir,
             goal_file = os.path.join(exp, "goals")
             if os.path.isfile(goal_file):
                 goals = np.loadtxt(goal_file, delimiter=' ')
-                plot_targeted_goals(goals, coord_names,exp)
+                plot_targeted_goals(goals, coord_names,exp,figname="goal_spread")
             goal_file = os.path.join(exp, "initial_targeted_goals")
             if os.path.isfile(goal_file):
                 goals = np.loadtxt(goal_file, delimiter=' ')
@@ -534,6 +538,14 @@ def plot_all_in_folder(dir,
             if os.path.isfile(goal_file):
                 goals = np.loadtxt(goal_file, delimiter=' ')
                 plot_targeted_goals(goals, coord_names,exp,figname="reselect_goal_spread")
+            goal_file = os.path.join(exp, "successful_goal_spread")
+            if os.path.isfile(goal_file):
+                goals = np.loadtxt(goal_file, delimiter=' ')
+                plot_targeted_goals(goals, coord_names,exp,figname="successful_goal_spread")
+            goal_file = os.path.join(exp, "successful_goal_obs_spread")
+            if os.path.isfile(goal_file):
+                goals = np.loadtxt(goal_file, delimiter=' ')
+                plot_targeted_goals(goals, coord_names,exp,figname="successful_goal_obs_spread")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -583,6 +595,7 @@ if __name__ == '__main__':
                        cutoff=args.cutoff,
                        window=10, #10
                        symlog_y=symlog_y,
+                       goal_plots=args.goal_plots,
                        )
     plot_all_in_folder(folder,
                        coord_names = coord_names,

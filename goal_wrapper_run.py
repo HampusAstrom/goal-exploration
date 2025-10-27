@@ -686,7 +686,8 @@ def train(base_path: str = "./data/wrapper/",
         if len(targeted_goals.shape) > 1: # requires goals tracked in more than one dim to plot this way
             utils.plot_targeted_goals(targeted_goals,
                                     coord_names,
-                                    os.path.join(base_path, options, experiment))
+                                    os.path.join(base_path, options, experiment),
+                                    figname="goal_spread")
             utils.plot_targeted_goals(initial_targeted_goals,
                                     coord_names,
                                     os.path.join(base_path, options, experiment),
