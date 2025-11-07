@@ -54,7 +54,9 @@ class QNetwork(BasePolicy):
         self.features_dim = features_dim
         action_dim = int(self.action_space.n)  # number of actions
         q_net = create_mlp(self.features_dim, action_dim, self.net_arch, self.activation_fn)
-        self.q_net = nn.Sequential(*q_net)
+        self.q_net = nn.Sequential(*q_net, nn.Sigmoid())
+        #self.q_net = nn.Sequential(*q_net)
+        # TODO replace hack with some nicer way to add change last activation_fn
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
         """
