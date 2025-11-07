@@ -496,10 +496,12 @@ if __name__ == '__main__':
         base_env = gym.make("PathologicalMountainCar-v1.1") # maybe we need some extra params...
         reward_func = "term"
 
+    # TODO make this file work for goal ranges to some extent at least
+
     goal_env = GoalWrapper(base_env,
                                     goal_weight=1.0,
                                     goal_range=0.1,
-                                    reward_func=reward_func)
+                                    after_goal_success=reward_func)
 
     for file in os.listdir(args.name):
         if file.endswith(".zip"):

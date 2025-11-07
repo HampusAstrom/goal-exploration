@@ -37,7 +37,7 @@ if __name__ == '__main__':
     env = GoalWrapper(env,
                     goal_weight=1.0,
                     goal_range=0.1,
-                    reward_func="local-reselect",
+                    after_goal_success="local-reselect",
                     goal_selection_strategies = lambda obs: goal)
     # Add monitor wrapper? prob not?
 

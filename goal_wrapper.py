@@ -30,7 +30,7 @@ class GoalWrapper(
             env: gym.Env,
             goal_weight: float=0.5,
             goal_range: float=-1,
-            reward_func = None, # TODO make type hint with Callable
+            after_goal_success = None, # TODO make type hint with Callable
             goal_selection_strategies = None, # TODO make type hint with Callable
             goal_sel_strat_weight = None,
             range_as_goal = False,
@@ -47,29 +47,33 @@ class GoalWrapper(
         self.goal_range = goal_range
         self.range_as_goal = range_as_goal
         self.wrap_for_range = wrap_for_range
+        self.after_goal_success = after_goal_success
         # for now this only supports flattenable observation spaces
         assert self.env.observation_space.is_np_flattenable
         # TODO this supports inputing a reward function from the outside, but we should
         # proabaly also support selecting different strategies in this code with sting arguments
-        if reward_func is None:
+        if after_goal_success is None:
             self.goal_reward = self.flatten_norm_reward
         # TODO unsure how to point to own method at creation, use strings for now
-        elif reward_func == "term":
+        # TODO these should all change now that reward_func is replaces by after_goal_success
+        # OBS OBS OBS these cases need a remake/clean!
+        elif after_goal_success == "term":
             # TODO I should split so that terminating is a separate option to reward eval
             self.goal_reward = self.terminating_binary_norm_reward
-        elif reward_func == "reselect":
+        elif after_goal_success == "reselect":
             self.goal_reward = self.reselecting_binary_norm_reward
             self.local_reselect = False
-        elif reward_func == "local-reselect":
+        elif after_goal_success == "local-reselect":
             self.goal_reward = self.reselecting_binary_norm_reward
             self.local_reselect = True
-        elif reward_func == "exact_goal_match_reward":
+        # TODO exact_goal_match_reward should be moved to new goal eval param
+        elif after_goal_success == "exact_goal_match_reward":
             self.goal_reward = self.exact_goal_match_reward
             self.local_reselect = False
         else:
-            self.goal_reward = reward_func
+            self.goal_reward = after_goal_success
 
-        if not reward_func == "exact_goal_match_reward":
+        if not after_goal_success == "exact_goal_match_reward":
             self.obs_scale = self.get_obs_norm()
             self.local_reselect = False
 
@@ -296,10 +300,9 @@ class GoalWrapper(
                                 desired_goal,
                                 info,
                                 ):
-        term = True
         success = (achieved_goal==desired_goal)
         ret = success * 1
-        if term:
+        if self.after_goal_success == "term":
             terminate = success
         else:
             terminate = np.full_like(success, False)
@@ -427,7 +430,9 @@ class GoalWrapper(
             self.success_obs.append(achieved_goal)
             self.successful_goal_index.append(len(self.targeted_goals)-1)
             # TODO this assumes reselect for now
-            if self.local_reselect: # TODO this version does not exist right now
+            if self.after_goal_success == "term":
+                return reward, True, success
+            if False and self.local_reselect: # TODO this version does not exist right now
                 self.goal = self.select_local_goal(achieved_goal) # assumes goal is obs for now
             else:
                 self.goal = self.select_goal(achieved_goal) # assumes goal is obs for now

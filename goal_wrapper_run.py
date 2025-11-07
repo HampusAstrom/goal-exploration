@@ -126,7 +126,7 @@ def train(base_path: str = "./data/wrapper/",
           fixed_goal_fraction = 0.0,
           device = None,
           goal_selection_params: dict = None,
-          reward_func: str = "term",
+          after_goal_success: str = "term",
           range_as_goal: bool = False,
           env_params: dict = None,
           env_id = "PathologicalMountainCar-v1.1",
@@ -157,10 +157,10 @@ def train(base_path: str = "./data/wrapper/",
     # TODO clean up this mess
     if baseline_override in [None, "grid-novelty"]:
         options = str(steps) + "steps_" \
-                + str(goal_weight) + "goalrewardWeight_" \
-                + str(fixed_goal_fraction) + "fixedGoalFraction_" \
-                + str(goal_range) + "goal_range_" \
-                + str(reward_func) + "-reward_func" \
+                + str(after_goal_success) \
+                #+ str(goal_weight) + "goalrewardWeight_" \
+                #+ str(fixed_goal_fraction) + "fixedGoalFraction_" \
+                #+ str(goal_range) + "goal_range_" \
 
     if baseline_override in [None, "grid-novelty"]:
         for key, val in goal_selection_params.items():
@@ -172,10 +172,10 @@ def train(base_path: str = "./data/wrapper/",
                 options += "_" + str(val) + key
     elif baseline_override == "uniform-goal":
         options = str(steps) + "steps_" \
-                + str(goal_weight) + "goalrewardWeight_" \
-                + str(goal_range) + "goal_range_" \
-                + str(reward_func) + "-reward_func_" \
+                + str(after_goal_success) + "_" \
                 + baseline_override + "-baseline"
+                #+ str(goal_weight) + "goalrewardWeight_" \
+                #+ str(goal_range) + "goal_range_" \
 
     if baseline_override in ["base-rl", "curious"]: # non-goal
         options = str(steps) + "steps_" \
@@ -183,6 +183,11 @@ def train(base_path: str = "./data/wrapper/",
     else:                                           # shared goal additions
         if range_as_goal:
             options += "_rangeGoal"
+        else:
+            options += str(goal_range) + "_goal_range"
+
+    if fixed_goal_fraction != 0:
+        options += "_" + str(fixed_goal_fraction) + "fixedGoalFraction"
 
     if buffer_size != int(1e6): # if not default
         options += "_" + str(buffer_size) + "buffer_size"
@@ -215,7 +220,7 @@ def train(base_path: str = "./data/wrapper/",
 
     print(options)
 
-    if reward_func == "term": # Add case for or restructure to handle exact match too
+    if after_goal_success == "term": # Add case for or restructure to handle exact match too
         terminate_at_goal_in_real = False # not needed if real term
     else:
         terminate_at_goal_in_real = True
@@ -224,6 +229,8 @@ def train(base_path: str = "./data/wrapper/",
         # when using ranges as goals and goal selection methods that
         # select points, use this to turn those goals into ranges
         wrap_for_range = True
+    else:
+        wrap_for_range = False
 
     # check existing experiments
     exp_paths = utils.get_all_folders(os.path.join(base_path, options))
@@ -265,7 +272,7 @@ def train(base_path: str = "./data/wrapper/",
                                      if v.default is not inspect.Parameter.empty}
     merged = default_goal_selection_params | goal_selection_params
     conf_params["goal_selection_params"] = merged
-    conf_params["reward_func"] = reward_func
+    conf_params["after_goal_success"] = after_goal_success
     if baseline_override is not None:
         # if making a baseline, some parameters are ignored, remove from conf
         # for clarity
@@ -291,7 +298,7 @@ def train(base_path: str = "./data/wrapper/",
         train_env_goal = GoalWrapper(train_env,
                                      goal_weight=goal_weight,
                                      goal_range=goal_range,
-                                     reward_func=reward_func,
+                                     after_goal_success=after_goal_success,
                                      range_as_goal=range_as_goal,
                                      wrap_for_range=wrap_for_range,
                                      )
@@ -343,10 +350,37 @@ def train(base_path: str = "./data/wrapper/",
             max_goals = [[-1.70, -0.07, -1.60, 0.0,],
                          [0.5, 0.0, 0.6, 0.07,],
             ]
+            max_goals = [[-1.70, -0.07, -1.60, 0.0,],
+                         [0.5, 0.0, 0.6, 0.07,],
+                         [ 1.00085936e-01, -6.02729847e-02,  3.86779122e-01,  4.44181123e-02],
+                         [-3.56716424e-01, -6.18883563e-02,  8.63878641e-02, -8.34396244e-03],
+                         [ 2.18684093e-01,  3.90903167e-02,  5.02551005e-01,  4.80780549e-02],
+                         [ 4.03650701e-01, -2.63528430e-02,  4.33245642e-01,  4.98868548e-02],
+                         [-1.67531003e+00, -3.84533985e-02, -7.09176660e-01,  6.33504931e-02],
+                         [-1.68231821e+00, -6.89519766e-02, -1.50134969e+00,  6.59849776e-02],
+                         [ 3.43190789e-01, -6.05484093e-02,  4.81386639e-01,  4.72225634e-02],
+                         [-1.36810730e+00, -6.38140400e-02,  4.19232501e-01, -2.41154414e-02],
+                         [ 4.85135019e-01,  5.27836259e-02,  5.69161911e-01,  6.84890449e-02],
+                         [ 6.97672883e-02,  1.13778990e-02,  5.47868144e-01,  4.15376470e-02],
+                         [-1.26223329e+00,  6.89371377e-02,  3.42234741e-01,  6.99203823e-02],
+                         [-2.32861340e-01, -6.84580506e-02,  4.57449734e-01,  3.24315328e-02],
+                         [-1.51552431e+00,  1.84240937e-02, -1.95313994e-02,  2.09420945e-02],
+                         [-1.62400395e+00,  3.14769447e-02, -7.20394119e-01,  6.43267009e-02],
+                         [-1.37953661e+00,  1.36864912e-02,  5.97108342e-01,  2.75630166e-02],
+                         [-3.51205835e-01,  6.73303157e-02,  5.14140035e-01,  6.81073994e-02],
+                         [-1.61280006e+00, -6.01168698e-02,  3.67342031e-01, -1.87129658e-02],
+                         [ 4.06076461e-01, -6.17086060e-02,  4.07544946e-01, -2.45365343e-02],
+                         [-1.21682617e+00,  5.18246852e-02,  1.12338400e-01,  5.30956992e-02],
+                         [-1.49977030e+00,  5.86865321e-02,  4.71921313e-01,  6.67302235e-02],
+                         [ 3.07349324e-01, -6.35200740e-02,  3.79228258e-01,  2.55321586e-02],
+                         [-4.29561395e-01,  2.63381153e-02,  2.90427584e-02,  4.70002601e-02],
+                         [-1.55965815e+00, -4.15685597e-02, -7.91227965e-01, -9.37543996e-03],
+                         [-6.11123538e-01,  1.01132356e-02,  1.75906278e-01,  3.32736568e-02],
+                         [-7.85424886e-01, -1.35230819e-03, -2.13653274e-01, -5.12745173e-04],]
         coord_names = ["xpos", "velocity"]
         # algo = DQN
-        algo = DQNwithICM
-        if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
+        algo = DQNwithICM # TODO we are not using ICM now, don't use it in any? or start using again?
+        if baseline_override in ["base-rl", "curious", "uniform-goal", "grid-novelty"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
     elif env_id == "FrozenLake-v1":
         # TODO make and shift when running with 8x8
@@ -400,7 +434,7 @@ def train(base_path: str = "./data/wrapper/",
                                 goal_weight=goal_weight,
                                 goal_range=eval_goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func="term",
+                                after_goal_success="term",
                                 range_as_goal=range_as_goal,
                                 )
                                 # TODO this will capture when goals are reached according to own metric
@@ -445,20 +479,20 @@ def train(base_path: str = "./data/wrapper/",
             goal_selection = goal_selector.select_goal
             goal_weight=1
             n_eval_episodes=goal_selector.len
-            reward_func="term"
+            after_goal_success="term"
             eval_goal_range=0.1
         if eval_type == "many":
             goal_selector = OrderedGoalSelection(many_goals)
             goal_selection = goal_selector.select_goal
             goal_weight=1
             n_eval_episodes=goal_selector.len
-            reward_func="term"
+            after_goal_success="term"
             eval_goal_range=0.1
         if eval_type == "fixed":
             goal_selection = fixed_goal
             goal_weight=0
             n_eval_episodes=5
-            reward_func="reselect" # to make sure we don't terminate early when going for external reward
+            after_goal_success="reselect" # to make sure we don't terminate early when going for external reward
             eval_goal_range=0.0001
 
 
@@ -472,7 +506,7 @@ def train(base_path: str = "./data/wrapper/",
                                 goal_weight=goal_weight,
                                 goal_range=eval_goal_range,
                                 goal_selection_strategies=goal_selection,
-                                reward_func=reward_func,
+                                after_goal_success=after_goal_success,
                                 range_as_goal=range_as_goal,
                                 )
                                 # for goal_weight 1 cases goal_range should probably not be too small
@@ -527,7 +561,7 @@ def train(base_path: str = "./data/wrapper/",
                        "replay_buffer_kwargs": dict(
                        n_sampled_goal=n_sampled_goal,
                        goal_selection_strategy="future",
-                       copy_info_dict=False, # TODO Turn off if not needed
+                       copy_info_dict=goal_weight!=1.0, # TODO Turn off if not needed
                        terminate_at_goal=True, # TODO make dependant on goal eval strat
                        terminate_at_goal_in_real=terminate_at_goal_in_real,), # TODO make dependant on goal eval strat
                        }
@@ -846,7 +880,10 @@ if __name__ == '__main__':
                          "goal_range": [0.0001],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
                          "env_params": named_permutations(env_params),
-                         "reward_func": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
+                         "after_goal_success": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
+                         # TODO reward_func is replaced with a pure term or reselect param
+                         # but we also need one for reward eval and handle it's relation to
+                         # goal selection methods
                          "buffer_size": [10_000_000],
                          "baseline_override": ["grid-novelty"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
                          "range_as_goal": [True], # only works with uniform goal selection for now
