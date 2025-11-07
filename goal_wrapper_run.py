@@ -145,9 +145,9 @@ def train(base_path: str = "./data/wrapper/",
 
     if env_id == "PathologicalMountainCar-v1.1" or \
         env_id == "CliffWalking-v0":
-        eval_freq = 50000 #50000 for patho MC and Cliffwalk (high freq 10000), 10000 frozen
+        eval_freq = 200_000 #50_000 for patho MC and Cliffwalk
     elif env_id == "FrozenLake-v1":
-        eval_freq = 10000
+        eval_freq = 10_000
     else:
         raise "Error, set eval_freq for this env"
 
@@ -216,7 +216,7 @@ def train(base_path: str = "./data/wrapper/",
     #options += "_her_episode_gradually_reduce_hindsight_from_0.8_to_0"
     #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net_exploration_fraction0.5_more_novelty_focus"
     #options += "_batch_size512_train_freq512_lr_1e-3_3x256net"#_more_novelty_focus"
-    options += "_batch_size512_lr_1e-3_2x256net" #_0_epsilonexplore" # _0.1-0.01_epsilonexplore #_goalpos[-1.70,-0.02],[0.6,0.02,]"
+    options += "_batch_size512_lr_1e-3_2x256net_sigmoid_output" #_0.1-0.005_epsilonexplore_decay_to_0.5" # _sigmoid_output _0_epsilonexplore" # _0.1-0.01_epsilonexplore #_goalpos[-1.70,-0.02],[0.6,0.02,]"
 
     print(options)
 
@@ -225,7 +225,8 @@ def train(base_path: str = "./data/wrapper/",
     else:
         terminate_at_goal_in_real = True
 
-    if baseline_override == "grid-novelty" and range_as_goal:
+    if baseline_override == "grid-novelty" and range_as_goal and not fixed_goal_fraction == 1:
+        # TODO replace last and here later, temp hack
         # when using ranges as goals and goal selection methods that
         # select points, use this to turn those goals into ranges
         wrap_for_range = True
@@ -581,7 +582,6 @@ def train(base_path: str = "./data/wrapper/",
                 gamma=0.95,
                 batch_size=batch_size,
                 train_freq=max(int(batch_size/t2g), 1),
-                #exploration_fraction=1.0,
                 #target_update_interval=1000,
                 #gradient_steps=-1,
                 #policy_kwargs=dict(net_arch=[256, 256, 256],),
@@ -593,8 +593,9 @@ def train(base_path: str = "./data/wrapper/",
                 seed=policy_seed,
                 device=device,
                 tensorboard_log=log_dir,
-                #exploration_initial_eps=0,
-                #exploration_final_eps=0,
+                #exploration_initial_eps=0.1,
+                #xploration_final_eps=0.005,
+                #exploration_fraction=0.5,
     )
 
     #model.replay_buffer.her_ratio = 0
@@ -842,7 +843,7 @@ if __name__ == '__main__':
     #                         "norm_comps": [True],
     #                         }
     goal_conf_to_permute = {"grid_size": [100],
-                            "fraction_random": [0.01],
+                            "fraction_random": [0.01], # 0.01
                             #"target_success_rate": [0.75], # turn on if intermediate instead of novelty # 0.75
                             "dist_decay": [2],
                             }

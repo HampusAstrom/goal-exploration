@@ -10,6 +10,7 @@ import functools
 
 from typing import List
 from scipy.ndimage import gaussian_filter
+import scipy.stats as stats
 
 eval_freq = 0
 
@@ -35,6 +36,127 @@ def threshold_gen(thresh):
 
     return partial
 
+def confidence(data, conf_level=0.95):
+    data = np.asarray(data)
+    # assume multiple data points, return as if, if 1d
+    if len(data) <= 0:
+        return None, None
+    elif len(data) <= 1:
+        return data.flatten(), np.zeros_like(data.flatten())
+    m = np.mean(data, 0) # assumes to comptute over first dim
+    s = np.std(data, 0, ddof=1)
+    n = len(data)
+    alpha = 1-conf_level
+    t = stats.t.ppf(1-(alpha/2), df=n-1)
+
+    return m, t * (s / np.sqrt(n)) # return mean and margin to add +-
+
+def mess2flatnumpy(lst):
+    try:
+        return np.array(lst).flatten()
+    except:
+        pass
+    ret = []
+    for element in lst:
+        ret.append(mess2flatnumpy(element))
+    return np.concatenate(ret)
+
+def data_relative_lims(data, ax, mi=None, ma=None):
+    data = mess2flatnumpy(data)
+    maxlim = np.max(data)
+    minlim = np.min(data)
+    rang = maxlim-minlim
+    maxlim += np.abs(rang*0.3)
+    minlim -= np.abs(rang*0.3)
+    if mi is not None:
+        minlim = np.min([mi, minlim])
+    if ma is not None:
+        maxlim = np.man([ma, maxlim])
+    ax.set_ylim(minlim, maxlim)
+    return minlim, maxlim
+
+def put_some_last(names, put_last):
+    add_last = []
+    new_names = []
+    for name in names:
+        label = name.replace("eval_logs_","")
+        if any(elem in label for elem in put_last):
+            add_last.append(name)
+        else:
+            new_names.append(name)
+    new_names += add_last
+    names = new_names
+    return names, add_last
+
+def collect_dfr_data(experiments, eval_type="eval_logs", func=None):
+    # this is only for base-rl
+    values = []
+    means = []
+    disc_fut_rewards = []
+    disc_fut_reward_means = []
+    Vs = []
+    V_means = []
+    for exp in experiments:
+        if not os.path.exists(os.path.join(exp, eval_type)):
+            return None, None
+        #avg_data = np.convolve(data, [1]*window, 'valid')/window
+        # monitor is sequential, so we need to bundle it by number of experiments
+        # in each evaluation, that info is found in completed.txt for now
+        # TODO replace this with data from evaluations.npz when it collects correctly
+        if os.path.isfile(os.path.join(exp, "completed.txt")):
+            with open(os.path.join(exp, "completed.txt"),'r') as measure_info:
+                reader = csv.reader(measure_info, delimiter=' ')
+                m_info = {k: int(v) for [k, v] in reader}
+            # TODO replace every use of monitor.csv IT IS WRONG!
+            tot_reward = np.loadtxt(os.path.join(exp, eval_type, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+            time = np.loadtxt(os.path.join(exp, eval_type, "monitor.csv"), delimiter=',', skiprows=2, usecols=1)
+            time = time.astype(int)
+            print(len(time))
+            print(time)
+            gamma = 0.95
+            #disc_fut_reward = tot_reward*(gamma**time)
+            # For now, compute to reverse engineer -1 every step
+            end_rew = tot_reward+time-1
+            d_end_rew = end_rew*(gamma**time)
+            d_step_cost = np.zeros_like(tot_reward)
+            d_st_cur = -1
+            d_st_tot = d_st_cur
+            for i in range(1, int(np.max(time))):
+                mask = time == i+1 # not for last step
+                d_step_cost[mask] = d_st_tot
+                d_st_cur = d_st_cur*0.99
+                d_st_tot += d_st_cur
+            disc_fut_reward = d_step_cost + d_end_rew
+
+            if n_eval > 1:
+                mean = means_for_multi_measure(tot_reward, m_info[eval_type], func=func)
+                disc_fut_reward_mean = means_for_multi_measure(disc_fut_reward, m_info[eval_type], func=func)
+            else:
+                if func is not None:
+                    mean = func(tot_reward)
+                    disc_fut_reward_mean = func(disc_fut_reward)
+                else:
+                    mean = tot_reward
+                    disc_fut_reward_mean = disc_fut_reward
+
+            means.append(mean)
+            values.append(tot_reward)
+            disc_fut_rewards.append(disc_fut_reward)
+            disc_fut_reward_means.append(disc_fut_reward_mean)
+
+            if os.path.exists(os.path.join(exp, eval_type, "evaluations.npz")):
+                evals = np.load(os.path.join(exp, eval_type, "evaluations.npz"))
+                # for eval in evals:
+                #     print(eval)
+                #     print(evals[eval].shape)
+                #     print(evals[eval])
+                dataV = evals["initial_v"].flatten()
+                dataV_mean = means_for_multi_measure(dataV, n_eval=n_eval, func=None)
+
+            Vs.append(dataV)
+            V_means.append(dataV_mean)
+
+    return means, values, disc_fut_reward_means, disc_fut_rewards, V_means, Vs
 
 # exponential moving average like tensorboard
 def ema_smooth(scalars: List[float], window: float) -> List[float]:  # Weight between 0 and 1
@@ -55,9 +177,13 @@ def gaussian_window_smooth(data, window):
     sigma = window/4 # adjustment to make it similar in effect
     return gaussian_filter(data, sigma=sigma)
 
+def no_smooth(data, window):
+    return data
+
 smooth = gaussian_window_smooth
 # smooth = window_smooth
 # smooth = ema_smooth
+#smooth = no_smooth
 
 # num is number of elements to fill, should be between 1 and len(weights)
 def weight_combinations(weights, num):
@@ -81,7 +207,7 @@ def weight_combinations(weights, num):
     return configurations
 
 def plot_targeted_goals(goals, coord_names, path, figname="goal_spread"):
-    if len(coord_names) != len(goals[0,:]):
+    if len(goals.shape) != 2 or len(coord_names) != len(goals[0,:]):
         return
     order = np.linspace(0, 1, len(goals))
 
@@ -144,6 +270,7 @@ def get_all_folders(dir, name=False, full=False):
     return sorted(subfolders, key=lambda entry: entry[0])
 
 def get_names_with(strarray, substrngs):
+    # TODO handle when user accidentally give string, not list of strings
     ret = []
     for str in strarray:
         if any(s in str for s in substrngs):
@@ -162,6 +289,7 @@ def get_best_x(folders, num2keep, frac_to_eval=0.2, eval_type="eval_logs"):
             datas = []
             if not os.path.exists(os.path.join(exp, eval_type)):
                 break
+            # TODO replace every use of monitor.csv IT IS WRONG!
             data = np.loadtxt(os.path.join(exp, eval_type, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
             cut = int(frac_to_eval*len(data))
             datas.append(data[-cut:])
@@ -187,6 +315,7 @@ def collect_datas(experiments, eval_type="eval_logs", func=None):
     for exp in experiments:
         if not os.path.exists(os.path.join(exp, eval_type)):
             return None, None
+        # TODO replace every use of monitor.csv IT IS WRONG!
         data = np.loadtxt(os.path.join(exp, eval_type, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
         #avg_data = np.convolve(data, [1]*window, 'valid')/window
         # monitor is sequential, so we need to bundle it by number of experiments
@@ -218,7 +347,10 @@ def add_subplot(path, window, ax, eval_type="eval_logs", name=None, func=None):
     if means is None:
         return
     means = np.array(means)
-    if means.ndim > 1:
+    mean, conf = confidence(means)
+    mean = smooth(mean, window)
+    conf = smooth(conf, window)
+    if means.ndim > 1: # TODO remove and make separate tolerance method when for when I want it
         data = np.mean(means, axis=0)
         std = np.std(means, axis=0)
     else:
@@ -228,13 +360,19 @@ def add_subplot(path, window, ax, eval_type="eval_logs", name=None, func=None):
     avg_std = smooth(std, window)
     x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
     if name != None:
-        ax.plot(x, avg_data, label=str(len(means))+ "exps " + f" {np.mean(data):.3f} mean " + name)
+        ax.plot(x, mean, label=str(len(means))+ "exps " + f" {np.mean(data):.3f} mean " + name)
     else:
-        ax.plot(x, avg_data, label=str(len(means))+ "exps " + f" {np.mean(data):.3f} mean " + os.path.basename(path))
-    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07,) # alpha=0.03
-    return x
+        ax.plot(x, mean, label=str(len(means))+ "exps " + f" {np.mean(data):.3f} mean " + os.path.basename(path))
+    ax.fill_between(x, mean+conf, mean-conf, alpha=0.07,) # alpha=0.03
+    return mean
 
-def plot_individual_experiments(path, window, eval_type="eval_logs", figname=None, func=None):
+def plot_individual_experiments(path,
+                                window,
+                                eval_type="eval_logs",
+                                figname=None,
+                                func=None,
+                                name_append="",
+                                ):
     experiments = get_all_folders(path)
     means, values = collect_datas(experiments, eval_type=eval_type, func=func)
     if means is None:
@@ -249,6 +387,9 @@ def plot_individual_experiments(path, window, eval_type="eval_logs", figname=Non
 
     # plot the mean
     means = np.array(means)
+    mean, conf = confidence(means)
+    mean = smooth(mean, window)
+    conf = smooth(conf, window)
     if means.ndim > 1:
         data = np.mean(means, axis=0)
         std = np.std(means, axis=0)
@@ -258,12 +399,13 @@ def plot_individual_experiments(path, window, eval_type="eval_logs", figname=Non
     avg_data = smooth(data, window)
     avg_std = smooth(std, window)
     x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
-    ax.plot(x, avg_data, label="average", zorder=100)
+    ax.plot(x, mean, label="average", zorder=100)
     # if name != None:
     #     ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + name)
     # else:
     #     ax.plot(x, avg_data, label=str(len(experiments))+ "exps " + os.path.basename(path))
-    ax.fill_between(x, avg_data+avg_std, avg_data-avg_std, alpha=0.07, zorder=100) # alpha=0.03
+    ax.fill_between(x, mean+conf, mean-conf, alpha=0.07, zorder=100) # alpha=0.03
+    minlim, maxlim = data_relative_lims([mean, means], ax)
 
     # plot each
     for i, exp in enumerate(means):
@@ -278,7 +420,7 @@ def plot_individual_experiments(path, window, eval_type="eval_logs", figname=Non
             framealpha=0.2).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
 
     # Save
-    plt.savefig(os.path.join(path,figname), bbox_inches="tight")
+    plt.savefig(os.path.join(path,figname+name_append), bbox_inches="tight")
     plt.close(fig)
 
 def plot_each_goal_in_exp(path,
@@ -288,7 +430,9 @@ def plot_each_goal_in_exp(path,
                           put_last = ['[-1.7, -0.02]', '[0.5, 0.02]'],
                           exclude=True,
                           func=None,
-                          figname=None):
+                          figname=None,
+                          name_append=""
+                          ):
     # path should be path ending in exp* here
     # check that exp is completed
     if not os.path.isfile(os.path.join(path, "completed.txt")):
@@ -304,12 +448,12 @@ def plot_each_goal_in_exp(path,
 
     # prep fig/ax
     px = 1/plt.rcParams['figure.dpi']
-    fig, ax = plt.subplots(figsize=(1000*px, 1000*px))
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
 
     # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver', 'gold']) *
     #                     cycler('linestyle', ['-', ':', '--', '-.',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
 
-    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver', 'gold']) *
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver',]) *
                     cycler('linestyle', [':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
     # TODO find out why this isn't applying
 
@@ -322,55 +466,50 @@ def plot_each_goal_in_exp(path,
     plt.rc('ytick', labelsize=18)    # fontsize of the tick labels
 
     datas = []
+    disd_fut_rewards = []
     # if exclude is True:
     #     numbers = {s: int(s.replace("eval_logs_", "")) for s in names}
     #     names = sorted(names, key=numbers.__getitem__)
-    add_last = []
-    new_names = []
-    for name in names:
-        label = name.replace("eval_logs_","")
-        if label in put_last:
-            add_last.append(name)
-        else:
-            new_names.append(name)
-    new_names += add_last
-    names = new_names
+    names, add_last = put_some_last(names, put_last)
 
-    for name in names:
+    for i, name in enumerate(names):
         if not os.path.exists(os.path.join(path, name)):
             return None, None
+        # TODO replace every use of monitor.csv IT IS WRONG!
         data = np.loadtxt(os.path.join(path, name, "monitor.csv"), delimiter=',', skiprows=2, usecols=0)
+        time = np.loadtxt(os.path.join(path, name, "monitor.csv"), delimiter=',', skiprows=2, usecols=1)
+        gamma = 0.95
+        disc_fut_reward = data*(gamma**time)
         if n_eval > 1:
             data = means_for_multi_measure(data, n_eval=n_eval, func=func)
+            disc_fut_reward = means_for_multi_measure(disc_fut_reward, n_eval=n_eval, func=func)
         else:
             if func is not None:
                 data = func(data)
-        avg_data = smooth(data, window)
-        x = np.linspace(0, len(avg_data)*eval_freq, len(avg_data))
+        data_smooth = smooth(data, window)
+        avg_disc_fut_reward = smooth(disc_fut_reward, window)
+        x = np.linspace(0, len(data_smooth)*eval_freq, len(data_smooth))
         label = name.replace("eval_logs_","")
         label = label.replace("[","(")
         label = label.replace("]",")")
-        if "(-1.7" in label: # hardcoded override
-            label += " hard ext. goal"
-        if "(0.5" in label: # hardcoded override
-            label += " easy ext. goal"
+        if "(-1.7," in label: # hardcoded override
+            label = " hard ext. goal"
+        elif "(0.5," in label: # hardcoded override
+            label = " easy ext. goal"
         # if "47" in label: # hardcoded override
         #     label += " (ext. goal)"
         # if "15" in label: # hardcoded override
         #     label += " (ext. goal)"
-        if name in add_last:
-            ax.plot(x, avg_data, **next(goal_prop), label=label)
         else:
-            ax.plot(x, avg_data, label=label, alpha=0.7)
+            label = str(i) # TODO temp override for large set of long goals
+        if name in add_last:
+            ax.plot(x, data_smooth, **next(goal_prop), label=label)
+        else:
+            ax.plot(x, data_smooth, label=label, alpha=0.7)
         datas.append(data)
+        disd_fut_rewards.append(disc_fut_reward)
 
-        # try to get and show initial_v data TODO
-        if os.path.exists(os.path.join(path, name, "evaluations.npz")):
-            evals = np.load(os.path.join(path, name, "evaluations.npz"))
-            lst = evals.files
-            for item in lst:
-                print(f"{name} {item} {evals[item].flatten()}")
-
+    # TODO determine if this should also be confidence, not tolerance
     means = np.mean(datas, axis=0)
     std = np.std(datas, axis=0)
     avg_data = smooth(means, window)
@@ -382,20 +521,104 @@ def plot_each_goal_in_exp(path,
     else:
         avg_std = np.zeros_like(avg_data)
 
-    ax.legend(loc='lower center',
+    meansD = np.mean(disd_fut_rewards, axis=0)
+    stdD = np.std(disd_fut_rewards, axis=0)
+    avg_dataD = smooth(meansD, window)
+    if len(names) > 1:
+        avg_stdD = smooth(stdD, window)
+    else:
+        avg_stdD = np.zeros_like(avg_dataD)
+
+    ax.legend(loc='upper center',
               bbox_to_anchor=(0.5, 0.0), # (0.65, 0.1), cliff #
               prop={'size': 11.5}, # 11.5 patho # 14 frozen # 11 cliff
               fancybox=True,
               ncol=4,
-              framealpha=0.9).set_zorder(101)
+              framealpha=0.3).set_zorder(101)
     ax.set_ylabel("goal success rate")
     ax.set_xlabel("steps")
-    ax.set_ylim(-0.2, 1.05) # ax.set_ylim(-0.05, 1.05) cliff
+    #ax.set_ylim(-0.1, 1.05) # ax.set_ylim(-0.05, 1.05) cliff # ax.set_ylim(-0.2, 1.05) pmc
+    ax.set_ylim(-0.05, 1.05)
 
-    plt.savefig(os.path.join(path,figname), bbox_inches="tight")
+    plt.savefig(os.path.join(path,figname+name_append), bbox_inches="tight")
     plt.close(fig)
 
-    return avg_data, avg_std
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver',]) *
+                    cycler('linestyle', [':',(0, (3, 1))]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+
+    goal_prop = iter(cycler('color', ['k']) *
+                cycler('linestyle', ['--', '-.', (5, (10, 3))]))
+
+    datas = []
+    # TODO temp prep fig for V data too
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
+    for i, name in enumerate(names):
+        if not os.path.exists(os.path.join(path, name)):
+            return avg_data, avg_std
+        # try to get and show initial_v data TODO
+        if not os.path.exists(os.path.join(path, name, "evaluations.npz")):
+            return avg_data, avg_std
+        evals = np.load(os.path.join(path, name, "evaluations.npz"))
+        lst = evals.files
+        data = evals["initial_v"].flatten()
+        label = name.replace("eval_logs_","")
+        label = label.replace("[","(")
+        label = label.replace("]",")")
+        if "(-1.7," in label: # hardcoded override
+            label = "hard ext. goal"
+        elif "(0.5," in label: # hardcoded override
+            label = "easy ext. goal"
+        # if "47" in label: # hardcoded override
+        #     label += " (ext. goal)"
+        # if "15" in label: # hardcoded override
+        #     label += " (ext. goal)"
+        else:
+            label = str(i) # TODO temp override for large set of long goals
+        if n_eval > 1:
+            data = means_for_multi_measure(data, n_eval=n_eval, func=None)
+        avg_dataV = smooth(data, window)
+        x = np.linspace(0, len(avg_dataV)*eval_freq, len(avg_dataV))
+        disd_fut_reward_smooth = data_smooth = smooth(disd_fut_rewards[i], window)
+        if name in add_last:
+            prop = next(goal_prop)
+            ax.plot(x, avg_dataV, **prop, label=label+" V est.")
+            prop['color'] = 'red'
+            ax.plot(x, disd_fut_reward_smooth, **prop, label=label+" real")
+        else:
+            ax.plot(x, avg_dataV, label=label+" V est.", alpha=0.5)
+            ax.plot(x, disd_fut_reward_smooth, label=label+" real", alpha=0.5)
+        datas.append(data)
+
+    meansV = np.mean(datas, axis=0)
+    std = np.std(datas, axis=0)
+    avg_dataV = smooth(meansV, window)
+    if len(names) > 1:
+        avg_stdV = smooth(std, window)
+        x = np.linspace(0, len(avg_dataV)*eval_freq, len(avg_dataV))
+        ax.plot(x, avg_dataV, label="average V est.", zorder=100, color='red', linestyle='-')
+        ax.fill_between(x, avg_dataV+avg_stdV, avg_dataV-avg_stdV, alpha=0.05, zorder=1, color='red')
+        ax.plot(x, avg_dataD, label="average real", zorder=100, color='k', linestyle='-')
+        ax.fill_between(x, avg_dataD+avg_stdD, avg_dataD-avg_stdD, alpha=0.05, zorder=1, color='k')
+    else:
+        avg_stdV = np.zeros_like(avg_dataV)
+
+    ax.legend(loc='upper center',
+              bbox_to_anchor=(0.5, 0.0), # (0.65, 0.1), cliff #
+              prop={'size': 11.5}, # 11.5 patho # 14 frozen # 11 cliff
+              fancybox=True,
+              ncol=4,
+              framealpha=0.3).set_zorder(101)
+    ax.set_ylabel("(expected) future discounted reward")
+    ax.set_xlabel("steps")
+    #minlim, maxlim = data_relative_lims([avg_dataD, avg_dataV, datas, disd_fut_rewards], ax)
+    #ax.set_ylim(-0.2, 1.05) # ax.set_ylim(-0.05, 1.05) cliff
+    ax.set_ylim(-0.05, 1.05)
+
+    plt.savefig(os.path.join(path,"initial_V_vs_discounted_future_reward"+name_append), bbox_inches="tight")
+    plt.close(fig)
+
+    # TODO return and make meta plot for V data too, but maybe make own func instead then...
+    return means, meansV, meansD
 
 def plot_all_in_folder(dir,
                        coord_names,
@@ -403,6 +626,7 @@ def plot_all_in_folder(dir,
                        keywords=[],
                        filter=None,
                        name_override=None,
+                       name_append="",
                        eval_type="eval_logs",
                        goal_plots=False,
                        indi_plots=True,
@@ -445,18 +669,21 @@ def plot_all_in_folder(dir,
     folders = sorted(folders)
 
     # make sure rl-base is always last, for readability as it is not in all graphs
-    folders_end = []
-    for i, str in enumerate(folders):
-        if ("base-rl" in str):
-            folders_end.append(folders[i])
-    folders = [x for x in folders if x not in folders_end]
-    folders += folders_end
+    # folders_end = []
+    # for i, str in enumerate(folders):
+    #     if ("base-rl" in str):
+    #         folders_end.append(folders[i])
+    # folders = [x for x in folders if x not in folders_end]
+    # folders += folders_end
+    folders, add_last = put_some_last(folders, ["base-rl", "epsilon"])
 
+    avg_datas = []
     for i, folder in enumerate(folders):
         if name_override != None:
-            x = add_subplot(folder, window, ax, eval_type=eval_type, name=name_override[i], func=func)
+            avg_data = add_subplot(folder, window, ax, eval_type=eval_type, name=name_override[i], func=func)
         else:
-            x = add_subplot(folder, window, ax, eval_type=eval_type, func=func)
+            avg_data = add_subplot(folder, window, ax, eval_type=eval_type, func=func)
+        avg_datas.append(avg_data)
 
     # oracle = np.ones(x.shape)*0.7
     # ax.plot(x, oracle, label="oracle", zorder=100, color='magenta', linestyle=':')
@@ -491,6 +718,7 @@ def plot_all_in_folder(dir,
     #ax.set_ylim(-100, 200)
     if symlog_y:
         ax.set_yscale('symlog')
+    minlim, maxlim = data_relative_lims(avg_datas, ax)
     fig.tight_layout()
     name = ""
     if num2keep > 0:
@@ -500,7 +728,8 @@ def plot_all_in_folder(dir,
         name += f"_including_{keywords}"
     if func is not None:
         name += "_" + "func"
-    plt.savefig(os.path.join(dir, name))
+    plt.savefig(os.path.join(dir, name+name_append))
+    plt.close(fig)
 
     plt.rc('axes', titlesize=10)     # fontsize of the axes title
     plt.rc('axes', labelsize=12)    # fontsize of the x and y labels
@@ -547,6 +776,58 @@ def plot_all_in_folder(dir,
                 goals = np.loadtxt(goal_file, delimiter=' ')
                 plot_targeted_goals(goals, coord_names,exp,figname="successful_goal_obs_spread")
 
+def plot_base_rl_dfr(names,
+                     num_exps,
+                     meansV,
+                     confsV,
+                     meansD,
+                     confsD,
+                     window,):
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
+                           cycler('linestyle', ['-',':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+    # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k']) +
+    #                            cycler('linestyle', ['-', ':','--', '-.'])))
+
+    plt.rc('axes', titlesize=20)     # fontsize of the axes title
+    plt.rc('axes', labelsize=28)    # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=18)    # fontsize of the tick labels
+    plt.rc('ytick', labelsize=18)    # fontsize of the tick labels
+
+    px = 1/plt.rcParams['figure.dpi']
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px)) # (1000*px, 1000*px)
+
+    for name, num_exp, meanV, confV, meanD, confD in zip(names, num_exps, meansV, confsV, meansD, confsD):
+        if meanV.size == 0:
+            break
+        x = np.linspace(0, len(meanV)*eval_freq, len(meanV))
+        print(meanD)
+        ax.plot(x, meanV, label=str(num_exp)+ "exps " + f" {np.mean(meanV):.3f} mean " + name + " V ext.", zorder=2)
+        if False: # tolerance
+            ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
+        else: # confidence
+            ax.fill_between(x, meanV+confV, meanV-confV, alpha=0.07, zorder=1)
+        ax.plot(x, meanD, label=str(num_exp)+ "exps " + f" {np.mean(meanD):.3f} mean " + name + " real", zorder=2)
+        if False: # tolerance
+            ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
+        else: # confidence
+            ax.fill_between(x, meanD+confD, meanD-confD, alpha=0.07, zorder=1)
+
+
+    ax.legend(loc='upper right', # 'upper left' # 'lower right'
+              prop={'size': 7}, # 8 # 18
+              fancybox=True,
+              framealpha=0.3).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
+
+    ax.set_ylabel("(expected) future discounted reward")
+    ax.set_xlabel("steps")
+    #minlim, maxlim = data_relative_lims(mean, ax, mi=0)
+    #ax.set_ylim([-0.2, 1.1])
+    #ax.set_ylim([-1.2, 2.1]) #test showing more when few data
+    #ax.set_ylim(np.max([-0.05,minlim]), np.min([1.05,maxlim]))
+
+    plt.savefig(os.path.join(folder,"base-rl_initial_V_vs_discounted_future_reward"+name_append), bbox_inches="tight")
+    plt.close(fig)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--top', default=0)
@@ -555,6 +836,10 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--name_override', nargs='*', default=None)
     parser.add_argument('-g', '--goal_plots', action='store_true')
     parser.add_argument('-c', '--cutoff', type=int, default=None)
+    parser.add_argument('-s', '--smooth', default=None,
+                        help="If not set, no smoothing. Smoothing options: \
+                            gaussian/g, window/w, ema/e")
+    parser.add_argument('-r', '--random_goals_only', action='store_true')
     args = parser.parse_args()
 
     #folder, coord_names = "./output/wrapper/SparsePendulumEnv-v1", ["x", "y", "ang. vel."],
@@ -567,23 +852,84 @@ if __name__ == '__main__':
     #eval_freq = 100000
     #eval_freq = 50000 #50000 frozen, 20000 for patho MC, (high freq 10000)
     if "FrozenLake" in folder:
-        eval_freq = 10000
+        eval_freq = 10_000
         thresh = 1
         symlog_y = False
         n_eval = 5
         put_last = ['15']
     elif "Patho" in folder:
-        eval_freq = 50000
+        eval_freq = 200_000# 50000
         thresh = 11
         symlog_y = False
         n_eval = 1
-        put_last = ['[-1.7, -0.02]', '[0.6, 0.02]']
+        put_last = ['[-1.7, -0.02]', '[0.6, 0.02]',
+                    '[-1.7, -0.07, -1.6, 0.0]', '[0.5, 0.0, 0.6, 0.07]','epsilon']
     elif "Cliff" in folder:
-        eval_freq = 50000
+        eval_freq = 50_000
         thresh = -14.0
         symlog_y = True
         n_eval = 1
         put_last = ['47']
+    eval_f_adjust = 50_000/eval_freq
+
+    if args.smooth in ["gaussian", "g"]:
+        smooth = gaussian_window_smooth
+        name_append = "_gaussian_smoothed"
+    elif args.smooth in ["window", "w"]:
+        smooth = window_smooth
+        name_append = "_window_smoothed"
+    elif args.smooth in ["ema", "e"]:
+        smooth = ema_smooth
+        name_append = "_ema_smoothed"
+    else:
+        smooth = no_smooth
+        name_append = ""
+
+    setups = get_all_folders(folder, full=True)
+    names, paths = zip(*setups)
+    names = get_names_with(names, ["base-rl-baseline"])
+    paths = get_names_with(paths, ["base-rl-baseline"])
+    meanVs = []
+    confVs = []
+    meanDs = []
+    confDs = []
+    num_exps = []
+    for name, path in zip(names, paths):
+        print(f"name {name}")
+        print(f"path {path}")
+        exps = get_all_folders(path)
+        exps, add_last = put_some_last(exps, put_last)
+        # for exp in exps:
+        #     if args.random_goals_only:
+        #         lst = ["eval_logs", "train_logs",]
+        #         for entry in put_last:
+        #             lst.append("eval_logs_"+entry)
+        #     else:
+        #         lst = ["eval_logs", "train_logs"]
+        dfr_data = collect_dfr_data(exps, "eval_logs")
+        means, values, disc_fut_reward_means, disc_fut_rewards, V_means, Vs = dfr_data
+        meanV, confV = confidence(V_means)
+        # meanV = smooth(meanV, int(20*eval_f_adjust))
+        # confV = smooth(confV, int(20*eval_f_adjust))
+        meanD, confD = confidence(disc_fut_reward_means)
+        meanVs.append(meanV)
+        confVs.append(confV)
+        meanDs.append(meanD)
+        confDs.append(confD)
+        num_exps.append(len(exps))
+
+        # TODO add supplot for each here
+
+    #meanV, confV = confidence(meanVs)
+    #meanD, confD = confidence(meanDs)
+    plot_base_rl_dfr(names,
+                     num_exps,
+                     meanVs,
+                     confVs,
+                     meanDs,
+                     confDs,
+                     window=int(20*eval_f_adjust), # 20
+                    )
 
     plot_all_in_folder(folder,
                        coord_names = coord_names,
@@ -593,9 +939,10 @@ if __name__ == '__main__':
                        name_override=args.name_override,
                        eval_type="eval_logs",
                        cutoff=args.cutoff,
-                       window=10, #10
+                       window=int(20*eval_f_adjust), #10
                        symlog_y=symlog_y,
                        goal_plots=args.goal_plots,
+                       name_append=name_append,
                        )
     plot_all_in_folder(folder,
                        coord_names = coord_names,
@@ -605,9 +952,10 @@ if __name__ == '__main__':
                        name_override=args.name_override,
                        eval_type="eval_logs",
                        cutoff=args.cutoff,
-                       window=10, #10
+                       window=int(20*eval_f_adjust), #10
                        indi_plots=False,
-                       func=threshold_gen(thresh)
+                       func=threshold_gen(thresh),
+                       name_append=name_append,
                        )
 
     # plot_all_in_folder(folder,
@@ -634,45 +982,83 @@ if __name__ == '__main__':
     avg_stds = []
     names = []
     num_exps = []
+    means = []
+    confs = []
+    meansV = []
+    confsV = []
+    meansD = []
+    confsD = []
     for name, path in setups:
         exps = get_all_folders(path)
         exp_datas = []
-        exp_stds = []
+        exp_edfr = []
+        exp_dfr = []
+        put_last = ["epsilon"]
+        exps, add_last = put_some_last(exps, put_last)
         for exp in exps:
+            if args.random_goals_only:
+                lst = ["eval_logs", "train_logs",]
+                for entry in put_last:
+                    lst.append("eval_logs_"+entry)
+            else:
+                lst = ["eval_logs", "train_logs"]
             # plot goal successes
-            avg_data, avg_std = plot_each_goal_in_exp(exp,
-                                                      window=20, # 20
+            avg_data, avg_edfr, avg_dfr = plot_each_goal_in_exp(exp,
+                                                      window=int(20*eval_f_adjust), # 20
                                                       n_eval=n_eval,
                                                       put_last=put_last,
-                                                      figname="goal_success_rate")
+                                                      lst=lst,
+                                                      figname="goal_success_rate",
+                                                      name_append=name_append,
+                                                      )
             # plot training success rate
             plot_each_goal_in_exp(exp,
-                                  100,
+                                  window=100,
                                   n_eval=1,
                                   lst=["train_logs"],
                                   exclude=False,
                                   func=threshold_gen(1), # TODO replace with non pmc hardcoded
-                                  figname="train_success_rate")
+                                  figname="train_success_rate",
+                                  name_append=name_append,
+                                  )
             if avg_data is None or avg_data.shape == ():
                 continue
             exp_datas.append(avg_data)
-            exp_stds.append(avg_std)
+            exp_edfr.append(avg_edfr)
+            exp_dfr.append(avg_dfr)
+        # TODO this is operating on smoothed data (when on) and that seems wrong?
+        # any smoothing should probably be after call to confidence
+        mean, conf = confidence(exp_datas)
+        mean = smooth(mean, int(20*eval_f_adjust))
+        conf = smooth(conf, int(20*eval_f_adjust))
+        meanV, confV = confidence(exp_edfr)
+        meanV = smooth(meanV, int(20*eval_f_adjust))
+        confV = smooth(confV, int(20*eval_f_adjust))
+        meanD, confD = confidence(exp_dfr)
+        meanD = smooth(meanD, int(20*eval_f_adjust))
+        confD = smooth(confD, int(20*eval_f_adjust))
         if len(exps) > 1:
             exp_datas = np.mean(exp_datas, 0)
-            exp_stds = np.mean(exp_stds, 0)
+            exp_edfr = np.mean(exp_edfr, 0)
         else:
-            exp_datas = np.array(exp_datas)
-            exp_stds = np.array(exp_stds)
-        if exp_datas.shape != ():
-            avg_datas.append(exp_datas.flatten())
-            avg_stds.append(exp_stds.flatten())
+            exp_datas = np.asarray(exp_datas).flatten()
+            exp_edfr = np.asarray(exp_edfr).flatten()
+        if exp_datas.shape != (): # handle empty experiment list (unfinished exp)
+            avg_datas.append(exp_datas)
+            avg_stds.append(exp_edfr)
             names.append(name)
             num_exps.append(len(exps))
+            means.append(mean)
+            confs.append(conf)
+            meansV.append(meanV)
+            confsV.append(confV)
+            meansD.append(meanD)
+            confsD.append(confD)
 
     # plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k']) +
     #                         cycler('linestyle', ['-', ':','--', '-.'])))
     plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
-                        cycler('linestyle', ['-',':',]))) # ':', '--', '-.', (5, (10, 3)) '--', '-.', (5, (10, 3))
+                        cycler('linestyle', ['-',':',]))) # ':', '--', '-.', (5, (10, 3))
 
     px = 1/plt.rcParams['figure.dpi']
     fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
@@ -682,25 +1068,79 @@ if __name__ == '__main__':
     plt.rc('xtick', labelsize=8)    # fontsize of the tick labels
     plt.rc('ytick', labelsize=8)    # fontsize of the tick labels
 
-    for name, data, std, num_exp in zip(names, avg_datas, avg_stds, num_exps):
+    for name, data, num_exp, mean, conf in zip(names, avg_datas, num_exps, means, confs):
         if data.size == 0:
             break
         x = np.linspace(0, len(data)*eval_freq, len(data))
-        ax.plot(x, data, label=str(num_exp)+ "exps " + f" {np.mean(data):.3f} mean " + name, zorder=2)
-        ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
+        ax.plot(x, mean, label=str(num_exp)+ "exps " + f" {np.mean(mean):.3f} mean " + name, zorder=2)
+        if False: # tolerance
+            ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
+        else: # confidence
+            ax.fill_between(x, mean+conf, mean-conf, alpha=0.07, zorder=1)
 
     # names = ["Intermediate Success", "Novelty",
     #          "Uniform Random",]
     # for i, name in enumerate(names):
     #     ax.lines[i].set_label(name)
 
-    ax.legend(loc='lower left', # 'upper left' # 'lower right'
-              prop={'size': 8}, # 8 # 18
+    ax.legend(loc='lower right', # 'upper left' # 'lower right'
+              prop={'size': 7}, # 8 # 18
               fancybox=True,
-              framealpha=0.8).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
+              framealpha=0.3).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
 
     ax.set_ylabel("goal success rate")
     ax.set_xlabel("steps")
+    minlim, maxlim = data_relative_lims(mean, ax, mi=0)
+    #ax.set_ylim([-0.2, 1.1])
+    #ax.set_ylim([-1.2, 2.1]) #test showing more when few data
+    ax.set_ylim(np.max([-0.05,minlim]), np.min([1.05,maxlim]))
 
-    plt.savefig(os.path.join(folder,"average_goal_success_rate"), bbox_inches="tight")
+    plt.savefig(os.path.join(folder,"average_goal_success_rate"+name_append), bbox_inches="tight")
+    plt.close(fig)
+
+
+    plt.rc('axes', prop_cycle=(cycler('color', ['r', 'b', 'g', 'k', 'c', 'y', 'm', 'sienna', 'pink', 'palegreen', 'silver']) *
+                        cycler('linestyle', ['-',':','--','-.',]))) # ':','--','-.',(5, (10, 3))
+
+    px = 1/plt.rcParams['figure.dpi']
+    fig, ax = plt.subplots(figsize=(1920*px, 1080*px))
+
+    plt.rc('axes', titlesize=10)     # fontsize of the axes title
+    plt.rc('axes', labelsize=12)    # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=8)    # fontsize of the tick labels
+    plt.rc('ytick', labelsize=8)    # fontsize of the tick labels
+
+    for name, num_exp, meanV, confV, meanD, confD in zip(names, num_exps, meansV, confsV, meansD, confsD):
+        if meanV.size == 0:
+            break
+        x = np.linspace(0, len(meanV)*eval_freq, len(meanV))
+        ax.plot(x, meanV, label=str(num_exp)+ "exps " + f" {np.mean(meanV):.3f} mean " + name + " V ext.", zorder=2)
+        if False: # tolerance
+            ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
+        else: # confidence
+            ax.fill_between(x, meanV+confV, meanV-confV, alpha=0.07, zorder=1)
+        ax.plot(x, meanD, label=str(num_exp)+ "exps " + f" {np.mean(meanD):.3f} mean " + name + " real", zorder=2)
+        if False: # tolerance
+            ax.fill_between(x, data+std, data-std, alpha=0.07, zorder=1)
+        else: # confidence
+            ax.fill_between(x, meanD+confD, meanD-confD, alpha=0.07, zorder=1)
+
+    # names = ["Intermediate Success", "Novelty",
+    #          "Uniform Random",]
+    # for i, name in enumerate(names):
+    #     ax.lines[i].set_label(name)
+
+    ax.legend(loc='upper right', # 'upper left' # 'lower right'
+              prop={'size': 7}, # 8 # 18
+              fancybox=True,
+              framealpha=0.3).set_zorder(101)#, bbox_to_anchor=(1, 0.5))
+
+    ax.set_ylabel("(expected) future discounted reward")
+    ax.set_xlabel("steps")
+    minlim, maxlim = data_relative_lims(mean, ax, mi=0)
+    #ax.set_ylim([-0.2, 1.1])
+    #ax.set_ylim([-1.2, 2.1]) #test showing more when few data
+    ax.set_ylim(np.max([-0.05,minlim]), np.min([1.05,maxlim]))
+
+    plt.savefig(os.path.join(folder,"initial_V_vs_discounted_future_reward"+name_append), bbox_inches="tight")
     plt.close(fig)
