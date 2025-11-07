@@ -76,6 +76,8 @@ def evaluate_policy(
     n_envs = env.num_envs
     episode_rewards = []
     episode_lengths = []
+    episode_disc_rewards = []
+    gamma = model.gamma
 
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
@@ -83,6 +85,7 @@ def evaluate_policy(
 
     current_rewards = np.zeros(n_envs)
     current_lengths = np.zeros(n_envs, dtype="int")
+    current_disc_rewards = np.zeros(n_envs)
     observations = env.reset(seed=seed)
     states = None
     episode_starts = np.ones((env.num_envs,), dtype=bool)
@@ -95,6 +98,7 @@ def evaluate_policy(
         )
         new_observations, rewards, dones, infos = env.step(actions)
         current_rewards += rewards
+        current_disc_rewards += rewards*(gamma**current_lengths)
         current_lengths += 1
         for i in range(n_envs):
             if episode_counts[i] < episode_count_targets[i]:
@@ -104,7 +108,7 @@ def evaluate_policy(
                 info = infos[i]
                 episode_starts[i] = done
 
-                if callback is not None:
+                if callback is not None: # TODO maybe I shoulud just use this?
                     callback(locals(), globals())
 
                 if dones[i]:
@@ -124,6 +128,8 @@ def evaluate_policy(
                         episode_rewards.append(current_rewards[i])
                         episode_lengths.append(current_lengths[i])
                         episode_counts[i] += 1
+                    episode_disc_rewards.append(current_disc_rewards[i])
+                    current_disc_rewards[i] = 0
                     current_rewards[i] = 0
                     current_lengths[i] = 0
 
@@ -135,6 +141,11 @@ def evaluate_policy(
     mean_reward = np.mean(episode_rewards)
     std_reward = np.std(episode_rewards)
 
+    # TODO shouldn't reset be within for loop if multiple (not used yet)
+    # also we do a reset up above, can/should we reuse it? (we should make sure
+    # that identical obs is used for V and real rollout, not i us but unsafe)
+    # seeding means all eval star the same for all evalcallbacks now
+    # is that a problem?
     observations = env.reset(seed=seed)
     initial_values = []
     for episode in range(np.max(episode_count_targets)):
@@ -148,5 +159,5 @@ def evaluate_policy(
     if reward_threshold is not None:
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
     if return_episode_rewards:
-        return episode_rewards, episode_lengths, initial_values
-    return mean_reward, std_reward, initial_values
+        return episode_rewards, episode_lengths, initial_values, episode_disc_rewards
+    return mean_reward, std_reward, initial_values, episode_disc_rewards

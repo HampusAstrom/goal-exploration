@@ -384,7 +384,7 @@ def train(base_path: str = "./data/wrapper/",
     def setup_evalcallbacks_from_goal_list(goals, freq=eval_freq, n_eval_episodes=1):
 
         eval_callback_list = []
-        for goal in goals:
+        for i, goal in enumerate(goals):
             eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs_" + str(goal))
             os.makedirs(eval_log_dir, exist_ok=True)
 
@@ -412,6 +412,7 @@ def train(base_path: str = "./data/wrapper/",
             eval_callback = EvalCallback(eval_env,
                                     best_model_save_path=eval_log_dir,
                                     log_path=eval_log_dir,
+                                    log_name=str(i), # TODO index or shorted goal as name?
                                     eval_freq=max(freq // n_training_envs, 1),
                                     n_eval_episodes=n_eval_episodes,
                                     deterministic=True,
@@ -481,6 +482,11 @@ def train(base_path: str = "./data/wrapper/",
             eval_env_goal = eval_env # TODO handle that this name becomes missleading
         eval_env = Monitor(eval_env_goal, eval_log_dir)
 
+        if eval_type == "fixed":
+            name = "hard"
+        else:
+            name = ""
+
         # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
         # When using multiple training environments, agent will be evaluated every
         # eval_freq calls to train_env.step(), thus it will be evaluated every
@@ -489,6 +495,7 @@ def train(base_path: str = "./data/wrapper/",
         eval_callback = EvalCallback(eval_env,
                                     best_model_save_path=eval_log_dir,
                                     log_path=eval_log_dir,
+                                    log_name=name, # TODO shorten or use index?
                                     eval_freq=max(eval_freq // n_training_envs, 1),
                                     n_eval_episodes=n_eval_episodes,
                                     deterministic=True,
