@@ -101,6 +101,7 @@ class DQN(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        double_dqn: bool = False,
     ) -> None:
         super().__init__(
             policy,
@@ -137,6 +138,7 @@ class DQN(OffPolicyAlgorithm):
         self.max_grad_norm = max_grad_norm
         # "epsilon" for the epsilon-greedy exploration
         self.exploration_rate = 0.0
+        self.double_dqn = double_dqn
 
         if _init_setup_model:
             self._setup_model()
@@ -197,8 +199,14 @@ class DQN(OffPolicyAlgorithm):
                 # Compute the next Q-values using the target network
                 next_q_values = self.q_net_target(replay_data.next_observations)
                 # Follow greedy policy: use the one with the highest value
-                next_q_values, _ = next_q_values.max(dim=1)
-                # Avoid potential broadcast issue
+                if self.double_dqn:
+                    # In double DQN select action based on policy net, but get Q from target net
+                    next_state_actions = self.q_net(replay_data.next_observations).max(1).indices
+                    # Get Q from target now
+                    next_q_values = next_q_values.gather(1, next_state_actions.unsqueeze(1)).squeeze(1)
+                else:
+                    next_q_values, _ = next_q_values.max(dim=1)
+                    # Avoid potential broadcast issue
                 next_q_values = next_q_values.reshape(-1, 1)
                 # 1-step TD target
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values

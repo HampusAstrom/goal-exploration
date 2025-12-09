@@ -37,6 +37,7 @@ class QNetwork(BasePolicy):
         features_dim: int,
         net_arch: Union[List[int], Dict] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         normalize_images: bool = True,
     ) -> None:
         super().__init__(
@@ -51,12 +52,14 @@ class QNetwork(BasePolicy):
 
         self.net_arch = net_arch
         self.activation_fn = activation_fn
+        self.out_act_fn = out_act_fn
         self.features_dim = features_dim
         action_dim = int(self.action_space.n)  # number of actions
         q_net = create_mlp(self.features_dim, action_dim, self.net_arch, self.activation_fn)
-        self.q_net = nn.Sequential(*q_net, nn.Sigmoid())
-        #self.q_net = nn.Sequential(*q_net)
-        # TODO replace hack with some nicer way to add change last activation_fn
+        if out_act_fn is not None: # use nn.Sigmoid() for GCRL
+            self.q_net = nn.Sequential(*q_net, out_act_fn)
+        else:
+            self.q_net = nn.Sequential(*q_net)
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
         """
@@ -81,6 +84,7 @@ class QNetwork(BasePolicy):
                 net_arch=self.net_arch,
                 features_dim=self.features_dim,
                 activation_fn=self.activation_fn,
+                out_act_fn=self.out_act_fn,
                 features_extractor=self.features_extractor,
             )
         )
@@ -117,6 +121,7 @@ class DQNPolicy(BasePolicy):
         lr_schedule: Schedule,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         normalize_images: bool = True,
@@ -141,12 +146,14 @@ class DQNPolicy(BasePolicy):
 
         self.net_arch = net_arch
         self.activation_fn = activation_fn
+        self.out_act_fn = out_act_fn
 
         self.net_args = {
             "observation_space": self.observation_space,
             "action_space": self.action_space,
             "net_arch": self.net_arch,
             "activation_fn": self.activation_fn,
+            "out_act_fn": self.out_act_fn,
             "normalize_images": normalize_images,
         }
 
@@ -192,6 +199,7 @@ class DQNPolicy(BasePolicy):
             dict(
                 net_arch=self.net_args["net_arch"],
                 activation_fn=self.net_args["activation_fn"],
+                out_act_fn=self.net_args["out_act_fn"],
                 lr_schedule=self._dummy_schedule,  # dummy lr schedule, not needed for loading policy alone
                 optimizer_class=self.optimizer_class,
                 optimizer_kwargs=self.optimizer_kwargs,
@@ -241,6 +249,7 @@ class CnnPolicy(DQNPolicy):
         lr_schedule: Schedule,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         features_extractor_class: Type[BaseFeaturesExtractor] = NatureCNN,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         normalize_images: bool = True,
@@ -253,6 +262,7 @@ class CnnPolicy(DQNPolicy):
             lr_schedule,
             net_arch,
             activation_fn,
+            out_act_fn,
             features_extractor_class,
             features_extractor_kwargs,
             normalize_images,
@@ -286,6 +296,7 @@ class MultiInputPolicy(DQNPolicy):
         lr_schedule: Schedule,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         features_extractor_class: Type[BaseFeaturesExtractor] = CombinedExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         normalize_images: bool = True,
@@ -298,6 +309,7 @@ class MultiInputPolicy(DQNPolicy):
             lr_schedule,
             net_arch,
             activation_fn,
+            out_act_fn,
             features_extractor_class,
             features_extractor_kwargs,
             normalize_images,
