@@ -6,6 +6,9 @@ from itertools import product
 import inspect
 import json
 import utils
+from torch import nn
+from copy import deepcopy
+from pprint import pprint
 
 from stable_baselines3 import SAC, HerReplayBuffer, DQN, PPO
 from stable_baselines3.dqn import DQNwithICM
@@ -15,9 +18,14 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from stable_baselines3.common.logger import configure
 
 #import imageio
 
+from wandb.integration.sb3 import WandbCallback
+import wandb
+
+from datetime import datetime, timedelta
 import time
 import yappi
 
@@ -128,15 +136,15 @@ def train(base_path: str = "./data/wrapper/",
           goal_selection_params: dict = None,
           after_goal_success: str = "term",
           range_as_goal: bool = False,
-          env_params: dict = None,
+          env_params_override: dict = None,
           env_id = "PathologicalMountainCar-v1.1",
-          buffer_size = int(1e6),
           baseline_override = None, # alternatives: "base-rl", "curious", "uniform-goal"
           verbose = 0,
           test_needed_experiments = False,
           algo_override = None,
           n_sampled_goal = 4, # Create 4 artificial transitions per real transition
           t2g_ratio = (1, "raw"), # train2gather ratio, first ratio, last "her" if mult with her_factor
+          algo_kwargs =  None,
          ):
 
     base_path = os.path.join(base_path,env_id)
@@ -148,66 +156,91 @@ def train(base_path: str = "./data/wrapper/",
         eval_freq = 200_000 #50_000 for patho MC and Cliffwalk
     elif env_id == "FrozenLake-v1":
         eval_freq = 10_000
+    elif env_id == "MountainCar-v0":
+        eval_freq = 2_000 #50_000
+    elif env_id == "Acrobot-v1":
+        eval_freq = 2_000 #50_000
     else:
         raise "Error, set eval_freq for this env"
+
+    pend_env_params = {"harder_start": [0.1]}
+    pathmc_env_params = {"terminate": [True]}
+    frozen_env_params = {"is_slippery": [True]}
+    cliffwalker_env_params = {"max_episode_steps": [300]} # override to play nice with HER #{"is_slippery": [False]}
+
+    if env_id == "SparsePendulumEnv-v1":
+        env_params_default = pend_env_params
+    elif env_id == "PathologicalMountainCar-v1.1":
+        env_params_default = pathmc_env_params
+    elif env_id == "FrozenLake-v1":
+        env_params_default = frozen_env_params
+    elif env_id == "CliffWalking-v0":
+        env_params_default = cliffwalker_env_params
+    elif env_id == "MountainCar-v0":
+        env_params_default = {}
+    elif env_id == "Acrobot-v1":
+        env_params_default = {}
+    else:
+        print("env without env params?")
+        exit()
+
+    env_params = env_params_default | env_params_override
 
     # Collect variables to store in json before cluttered
     conf_params = locals()
 
     # TODO clean up this mess
     if baseline_override in [None, "grid-novelty"]:
-        options = str(steps) + "steps_" \
+        options = np.format_float_scientific(steps,trim="-",exp_digits=1) + "steps|" \
                 + str(after_goal_success) \
                 #+ str(goal_weight) + "goalrewardWeight_" \
                 #+ str(fixed_goal_fraction) + "fixedGoalFraction_" \
                 #+ str(goal_range) + "goal_range_" \
 
     if baseline_override in [None, "grid-novelty"]:
-        for key, val in goal_selection_params.items():
-            if type(val) is list:
-                options += "_[" + ",".join(str(v) for v in val) + "]" + key
-            elif val is True:
-                options += "_" + key
-            else:
-                options += "_" + str(val) + key
+        options += utils.dict2string(goal_selection_params)
     elif baseline_override == "uniform-goal":
-        options = str(steps) + "steps_" \
-                + str(after_goal_success) + "_" \
+        options = np.format_float_scientific(steps,trim="-",exp_digits=1) + "steps|" \
+                + str(after_goal_success) + "|" \
                 + baseline_override + "-baseline"
                 #+ str(goal_weight) + "goalrewardWeight_" \
                 #+ str(goal_range) + "goal_range_" \
 
     if baseline_override in ["base-rl", "curious"]: # non-goal
-        options = str(steps) + "steps_" \
+        options = np.format_float_scientific(steps,trim="-",exp_digits=1) + "steps|" \
                 + baseline_override + "-baseline"
     else:                                           # shared goal additions
         if range_as_goal:
-            options += "_rangeGoal"
+            options += "|rangeGoal"
         else:
-            options += str(goal_range) + "_goal_range"
+            options += str(goal_range) + "|goal_range"
 
     if fixed_goal_fraction != 0:
-        options += "_" + str(fixed_goal_fraction) + "fixedGoalFraction"
-
-    if buffer_size != int(1e6): # if not default
-        options += "_" + str(buffer_size) + "buffer_size"
+        options += "|" + str(fixed_goal_fraction) + "fixedGoalFraction"
 
     if n_sampled_goal != 4 and baseline_override not in ["base-rl"]:
-        options += "_" + str(n_sampled_goal+1) + "her_factor"
+        options += "|" + str(n_sampled_goal+1) + "her_factor"
 
     if t2g_ratio != (1, "raw"):
         if t2g_ratio[1] == "her":
-            options += "_herX" + str(t2g_ratio[0]) + "t2g"
+            options += "|herX" + str(t2g_ratio[0]) + "t2g"
         else:
-            options += "_" + str(t2g_ratio[0]) + "t2g"
+            options += "|" + str(t2g_ratio[0]) + "t2g"
 
     if algo_override is not None:
-        options += "_" + str(algo_override.__name__)
+        options += "|" + str(algo_override.__name__)
 
     if t2g_ratio[1] == "her":
         t2g = t2g_ratio[0]*(n_sampled_goal+1)
     else:
         t2g = t2g_ratio[0]
+
+    if algo_kwargs:
+        # TODO cleaup and make only show up if not default (requires) knowing selected algo
+        options += "|" + utils.dict2string(algo_kwargs)
+
+    if env_params_override:
+        options += "|" + utils.dict2string(env_params_override)
 
     # TODO hard coded options addition
     #options += "_256-256-256-256-256net"
@@ -216,7 +249,13 @@ def train(base_path: str = "./data/wrapper/",
     #options += "_her_episode_gradually_reduce_hindsight_from_0.8_to_0"
     #options += "_batch_size512_train_freq512_lr_1e-3_4x256resblock-x4net_exploration_fraction0.5_more_novelty_focus"
     #options += "_batch_size512_train_freq512_lr_1e-3_3x256net"#_more_novelty_focus"
-    options += "_batch_size512_lr_1e-3_2x256net_sigmoid_output" #_0.1-0.005_epsilonexplore_decay_to_0.5" # _sigmoid_output _0_epsilonexplore" # _0.1-0.01_epsilonexplore #_goalpos[-1.70,-0.02],[0.6,0.02,]"
+    #options += "_batch_size512_lr_1e-3_2x256net_0.1-0.005_epsilonexplore_decay_to_0.5_gamma0.999" # _sigmoid_output _0.1-0.005_epsilonexplore_decay_to_0.5" # _sigmoid_output _0_epsilonexplore" # _0.1-0.01_epsilonexplore #_goalpos[-1.70,-0.02],[0.6,0.02,]"
+
+    if len(options) > 255:
+        options = np.format_float_scientific(steps,trim="-",exp_digits=1) + "steps|" \
+                + baseline_override + "-baseline"
+        options_dict = algo_kwargs | env_params_override
+        options += "|" + utils.to_short_string(options_dict)
 
     print(options)
 
@@ -348,9 +387,9 @@ def train(base_path: str = "./data/wrapper/",
                      ]
         if range_as_goal:
             fixed_goal = lambda obs: np.array([-1.70, -0.07, -1.60, 0.0,])
-            max_goals = [[-1.70, -0.07, -1.60, 0.0,],
-                         [0.5, 0.0, 0.6, 0.07,],
-            ]
+            # max_goals = [[-1.70, -0.07, -1.60, 0.0,],
+            #              [0.5, 0.0, 0.6, 0.07,],
+            # ]
             max_goals = [[-1.70, -0.07, -1.60, 0.0,],
                          [0.5, 0.0, 0.6, 0.07,],
                          [ 1.00085936e-01, -6.02729847e-02,  3.86779122e-01,  4.44181123e-02],
@@ -413,6 +452,51 @@ def train(base_path: str = "./data/wrapper/",
         algo = DQNwithICM
         if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
+    elif env_id == "MountainCar-v0":
+        if range_as_goal:
+            fixed_goal = lambda obs: np.array([0.5, 0.0, 0.6, 0.07,])
+            max_goals = [
+                [-1.70, -0.07, -1.60, 0.0,],
+                [0.5, 0.0, 0.6, 0.07,],
+                [ 1.00085936e-01, -6.02729847e-02,  3.86779122e-01,  4.44181123e-02],
+                [-3.56716424e-01, -6.18883563e-02,  8.63878641e-02, -8.34396244e-03],
+                [ 2.18684093e-01,  3.90903167e-02,  5.02551005e-01,  4.80780549e-02],
+                [ 4.03650701e-01, -2.63528430e-02,  4.33245642e-01,  4.98868548e-02],
+                [-1.67531003e+00, -3.84533985e-02, -7.09176660e-01,  6.33504931e-02],
+                [-1.68231821e+00, -6.89519766e-02, -1.50134969e+00,  6.59849776e-02],
+                [ 3.43190789e-01, -6.05484093e-02,  4.81386639e-01,  4.72225634e-02],
+                [-1.36810730e+00, -6.38140400e-02,  4.19232501e-01, -2.41154414e-02],
+                [ 4.85135019e-01,  5.27836259e-02,  5.69161911e-01,  6.84890449e-02],
+                [ 6.97672883e-02,  1.13778990e-02,  5.47868144e-01,  4.15376470e-02],
+                [-1.26223329e+00,  6.89371377e-02,  3.42234741e-01,  6.99203823e-02],
+                [-2.32861340e-01, -6.84580506e-02,  4.57449734e-01,  3.24315328e-02],
+                [-1.51552431e+00,  1.84240937e-02, -1.95313994e-02,  2.09420945e-02],
+                [-1.62400395e+00,  3.14769447e-02, -7.20394119e-01,  6.43267009e-02],
+                [-1.37953661e+00,  1.36864912e-02,  5.97108342e-01,  2.75630166e-02],
+                [-3.51205835e-01,  6.73303157e-02,  5.14140035e-01,  6.81073994e-02],
+                [-1.61280006e+00, -6.01168698e-02,  3.67342031e-01, -1.87129658e-02],
+                [ 4.06076461e-01, -6.17086060e-02,  4.07544946e-01, -2.45365343e-02],
+                [-1.21682617e+00,  5.18246852e-02,  1.12338400e-01,  5.30956992e-02],
+                [-1.49977030e+00,  5.86865321e-02,  4.71921313e-01,  6.67302235e-02],
+                [ 3.07349324e-01, -6.35200740e-02,  3.79228258e-01,  2.55321586e-02],
+                [-4.29561395e-01,  2.63381153e-02,  2.90427584e-02,  4.70002601e-02],
+                [-1.55965815e+00, -4.15685597e-02, -7.91227965e-01, -9.37543996e-03],
+                [-6.11123538e-01,  1.01132356e-02,  1.75906278e-01,  3.32736568e-02],
+                [-7.85424886e-01, -1.35230819e-03, -2.13653274e-01, -5.12745173e-04],]
+        else:
+            fixed_goal = lambda obs: np.array([0.5, 0.0, ])
+        coord_names = ["xpos", "velocity"]
+        algo = DQN
+    elif env_id == "Acrobot-v1":
+        if range_as_goal:
+            # TODO
+            print("No range goals for Acrobot-v1 yet, exiting")
+            exit()
+        else:
+            fixed_goal = lambda obs: np.array([-1.0, 0.0, -1.0, 0.0, 0.0, 0.0])
+        coord_names = ["cos_theta1", "sin_theta1","cos_theta1", "sin_theta1","theta1dot","theta2dot"]
+        algo = DQN
+
     if algo_override is not None:
         algo = algo_override
 
@@ -552,13 +636,11 @@ def train(base_path: str = "./data/wrapper/",
     eval_log_dir = os.path.join(base_path, options, experiment, "eval_logs")
     os.makedirs(eval_log_dir, exist_ok=True)
 
-    #check_env(train_env)
-
     # TODO replace all these checks with non-listed logic
     if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         # only use HER buffer when training with goal
         policy = "MultiInputPolicy"
-        algo_kwargs = {"replay_buffer_class": HerReplayBuffer,
+        algo_kwargs_add = {"replay_buffer_class": HerReplayBuffer,
                        "replay_buffer_kwargs": dict(
                        n_sampled_goal=n_sampled_goal,
                        goal_selection_strategy="future",
@@ -570,32 +652,68 @@ def train(base_path: str = "./data/wrapper/",
         #     algo_kwargs["replay_buffer_kwargs"]["handle_timeout_termination"] = True
     else:
         policy = "MlpPolicy"
-        algo_kwargs = {}
-    batch_size = 512
+        algo_kwargs_add = {}
+
+    # setup algo_kwargs_default
+    #policy_kwargs=dict(net_arch=[256, 256, 256],)
+    #policy_kwargs=dict(net_arch=[128, 128, 128],)
+    #policy_kwargs=dict(net_arch=[256, 256],)
+    policy_kwarg_defaults=dict(net_arch=[64, 64],)
+    #policy_kwargs=dict(net_arch=[256, 256, 256, 256, 256, 256, 256, 256, 256],)
+    #policy_kwargs=dict(net_arch={"res-block": [256, 256, 256, 256], "num_blocks": 4},)
+    if baseline_override != "base-rl":
+        policy_kwarg_defaults["out_act_fn"] = nn.Sigmoid()
+
+    # TODO make default from algo __init__ defaults first, then do any overrides
+    # with my defaults here, and that will be my default conf
+
+    batch_size = 128 # 512
+    learning_starts = 500
+    if "max_episode_steps" in env_params:
+        learning_starts = max(learning_starts, env_params["max_episode_steps"])
+    algo_kwargs_default = dict(
+        learning_starts=500, #300
+        verbose=verbose,
+        buffer_size = int(1e6),
+        learning_rate=1e-3,
+        gamma=0.99,
+        batch_size=batch_size,
+        train_freq=1, #max(int(batch_size/t2g), 1),
+        target_update_interval=100, # TODO this was prob the error! try arround here
+        #gradient_steps=-1,
+        policy_kwargs=policy_kwarg_defaults, # TODO put overrides in finial used
+        seed=policy_seed,
+        device=device,
+        tensorboard_log=log_dir,
+        exploration_initial_eps=1.0,
+        exploration_final_eps=0.01,
+        exploration_fraction=0.5,
+        double_dqn=False,
+    )
+
+    temp = utils.deepcopy(algo_kwargs_default)
+    # Add HER replay buffer stuff to default if GC
+    utils.deepmerge(algo_kwargs_default, algo_kwargs_add)
+
+    algo_kwargs_merged = utils.deepmerge({},
+                                         algo_kwargs_default,
+                                         algo_kwargs)
+
+    pprint(algo_kwargs_merged)
+    diff = utils.DeepDiff(algo_kwargs_default,
+                          algo_kwargs_merged)
+    # diff = utils.DeepDiff(temp,
+    #                       algo_kwargs_merged,)
+    delta = utils.Delta(diff, force=True)
+    diff_dict = {} + delta
+    diff_dict = utils.replace_type_in_dict_from(diff_dict, algo_kwargs_merged)
+    group_name = utils.to_short_string(diff_dict, temp)
+
+    print(f"Group name: {group_name}")
+
     model = algo(policy,
                 train_env,
-                **algo_kwargs,
-                learning_starts=300,
-                verbose=verbose,
-                buffer_size=buffer_size,
-                learning_rate=1e-3,
-                gamma=0.95,
-                batch_size=batch_size,
-                train_freq=max(int(batch_size/t2g), 1),
-                #target_update_interval=1000,
-                #gradient_steps=-1,
-                #policy_kwargs=dict(net_arch=[256, 256, 256],),
-                #policy_kwargs=dict(net_arch=[128, 128, 128],),
-                policy_kwargs=dict(net_arch=[256, 256],),
-                #policy_kwargs=dict(net_arch=[64, 64],),
-                #policy_kwargs=dict(net_arch=[256, 256, 256, 256, 256, 256, 256, 256, 256],),
-                #policy_kwargs=dict(net_arch={"res-block": [256, 256, 256, 256], "num_blocks": 4},),
-                seed=policy_seed,
-                device=device,
-                tensorboard_log=log_dir,
-                #exploration_initial_eps=0.1,
-                #xploration_final_eps=0.005,
-                #exploration_fraction=0.5,
+                **algo_kwargs_merged,
     )
 
     #model.replay_buffer.her_ratio = 0
@@ -636,7 +754,7 @@ def train(base_path: str = "./data/wrapper/",
 
         #callback = CallbackList([mapping_callback, eval_callback])
         #callback = CallbackList([eval_callback])
-        callback = eval_callbacks
+        callbacks = eval_callbacks
 
         #goal_selection_strategies = [train_env_goal.sample_obs_goal, fixed_goal]
         goal_selection_strategies = [goal_selection.select_goal_for_coverage, fixed_goal]
@@ -644,11 +762,11 @@ def train(base_path: str = "./data/wrapper/",
         train_env_goal.set_goal_strategies(goal_selection_strategies, goal_sel_strat_weight)
         train_env_goal.print_setup()
     elif baseline_override == "uniform-goal":
-        callback = eval_callbacks
+        callbacks = eval_callbacks
         train_env_goal.set_goal_strategies([train_env_goal.sample_obs_goal])
         train_env_goal.print_setup()
     elif baseline_override == "grid-novelty":
-        callback = eval_callbacks
+        callbacks = eval_callbacks
         goal_selection = GridNoveltySelection(train_env_goal,
                                               train_steps=steps,
                                               **goal_selection_params,
@@ -660,17 +778,82 @@ def train(base_path: str = "./data/wrapper/",
                                            goal_selector_obj=goal_selection)
         train_env_goal.print_setup()
     else:
-        callback = eval_callbacks
+        callbacks = eval_callbacks
+
+    # TODO update this when updating code above here, and input to this method
+    # alternatively, move all these checks and name stuff to external function,
+    # so this can be done there based on experiment_list in main method prob best
+    wandb_config = dict(
+        steps = steps,
+        goal_weight = goal_weight,
+        goal_range = goal_range,
+        eval_seed = eval_seed,
+        train_seed = train_seed,
+        policy_seed = policy_seed,
+        fixed_goal_fraction = fixed_goal_fraction,
+        device = device,
+        goal_selection_params = goal_selection_params,
+        after_goal_success = after_goal_success,
+        range_as_goal = range_as_goal,
+        env_params = env_params,
+        env_id = env_id,
+        baseline_override = baseline_override,
+        verbose = verbose,
+        test_needed_experiments = test_needed_experiments,
+        algo_override = algo_override,
+        n_sampled_goal = n_sampled_goal,
+        t2g_ratio = t2g_ratio,
+        algo_kwargs = algo_kwargs_merged,
+        eval_freq = eval_freq,
+        terminate_at_goal_in_real = terminate_at_goal_in_real,
+        wrap_for_range = wrap_for_range,
+    )
+
+    # TODO determine if this needs to be after any of the things below like the
+    # algo_kwarg stuff, or if the algorithm kwargs are captured anyway
+    # setup wandb after confirming experiments, this is where we know we are running
+    proj_name = env_id
+    # if env params changed, add to proj name, as it different task then
+    if env_params_override is not None:
+        proj_name += "|" + utils.dict2string(env_params_override)
+
+    run = wandb.init( # TODO determine how to do this best
+        project=proj_name,
+        dir=os.path.join(base_path, options, experiment, "wandb_logs"),
+        # name=??, # should be short, how to make shortest here?
+        notes=options, # put options as note instead
+        tags=[baseline_override, after_goal_success],
+        config=wandb_config,
+        group=group_name,
+        save_code=True,  # optional
+        #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+        monitor_gym=True,  # auto-upload the videos of agents playing the game
+        reinit="finish_previous",
+    )
+
+    wandb_callback = WandbCallback(
+        gradient_save_freq=eval_freq/10, # TODO make separate variable for this
+        model_save_freq=eval_freq,
+        model_save_path=os.path.join(base_path, options, experiment, 'model'),
+    )
+
+    callbacks.append(wandb_callback)
+
+    # replace logger to add wandb stuff to it as well
+    format_strings = os.getenv("SB3_LOG_FORMAT", "stdout,log,csv").split(",")
+    format_strings.append(run) # TODO this breaks type hint for configure
+    new_logger = configure(log_dir, format_strings)
+    model.set_logger(new_logger)
 
     print(model.policy)
 
     start_time = time.time()
-    model.learn(steps, callback=CallbackList(callback), progress_bar=True)
+    model.learn(steps, callback=CallbackList(callbacks), progress_bar=True)
     time_used = time.time() - start_time
     print("--- %s seconds ---" % (time_used))
     #model.learn(steps, progress_bar=True)
-    model_path = os.path.join(base_path, options, experiment, 'model')
-    model.save(model_path)
+    model_path = os.path.join(base_path, options, experiment, 'final_model')
+    model.save(model_path) # TODO this is probably no longer needed, but check first
 
     if baseline_override in ["grid-novelty"]:
         np.savetxt(os.path.join(base_path, options, experiment,"n_shape"),
@@ -710,6 +893,16 @@ def train(base_path: str = "./data/wrapper/",
             fp.write('eval_logs 5\n')
         elif env_id == "CliffWalking-v0":
             fp.write('eval_logs 5\n')
+        elif env_id == "MountainCar-v0":
+            fp.write('eval_logs 5\n')
+            fp.write('eval_logsfew 2\n')
+            fp.write('eval_logsmany 5\n')
+        elif env_id == "Acrobot-v1":
+            fp.write('eval_logs 5\n')
+            fp.write('eval_logsfew 2\n')
+            fp.write('eval_logsmany 5\n')
+
+    run.finish()
 
     if baseline_override in [None, "uniform-goal", "grid-novelty"]:
         targeted_goals = stack(train_env_goal.targeted_goals)
@@ -848,54 +1041,58 @@ if __name__ == '__main__':
                             "dist_decay": [2],
                             }
 
-    pend_env_params = {"harder_start": [0.1]}
-    pathmc_env_params = {"terminate": [True]}
-    frozen_env_params = {"is_slippery": [True]}
-    cliffwalker_env_params = {"max_episode_steps": [300]} # override to play nice with HER #{"is_slippery": [False]}
-
-    env_id = "PathologicalMountainCar-v1.1" # "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    env_id = "PathologicalMountainCar-v1.1" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
     # TODO get updated gym envs with cliffwalking v1
 
-    if env_id == "SparsePendulumEnv-v1":
-        env_params = pend_env_params
-    elif env_id == "PathologicalMountainCar-v1.1":
-        env_params = pathmc_env_params
-    elif env_id == "FrozenLake-v1":
-        env_params = frozen_env_params
-    elif env_id == "CliffWalking-v0":
-        env_params = cliffwalker_env_params
-    else:
-        print("env without env params?")
-        exit()
-    # env_params = {#"harder_start": [0.1], # pendulum
-    #               "terminate": [True] # patho mc
-    #               #"is_slippery": [True]
-    #               }
+    env_params_override = {"max_episode_steps": [1000]}
 
-    params_to_permute = {"experiments": [2],
+    policy_kwargs_to_permute=dict(
+        net_arch=[[80],] # [80], [32, 32],[128, 128], [64, 64], [64, 64, 64],
+    )
+
+    algo_kwargs_to_permute = dict(
+        policy_kwargs=named_permutations(policy_kwargs_to_permute),
+        learning_rate=[1e-3,], #1e-3
+        batch_size=[200], # 256
+        buffer_size=[5_000,],
+        target_update_interval=[100], # 10,100,200,500,1000
+        gamma=[0.99,], # 0.95, 0.99,0.999
+        exploration_fraction=[0.25,], # 0.5,0.2,0.1
+        exploration_initial_eps=[1], # 1,0.1,0.01,
+        exploration_final_eps=[0.01],
+        train_freq=[1,], # 1,3,10,30
+        double_dqn=[False],
+        learning_starts=[500], # 500,1000,3000,10_000
+        #tau=[0.2,0.3], # 1.0, 0.5, 0.1
+    )
+
+    params_to_permute = {"experiments": [20],
                          "env_id": [env_id],
                          "fixed_goal_fraction": [0.0],
-                         "device": ["cuda"],
-                         "steps": [10_000_000], # 10_000_000 pmc default
+                         "device": ["cpu"],
+                         "steps": [1_000_000], # 10_000_000 pmc default
                          "goal_weight": [1.0],
                          "goal_range": [0.0001],
                          "goal_selection_params": named_permutations(goal_conf_to_permute),
-                         "env_params": named_permutations(env_params),
+                         "env_params_override": named_permutations(env_params_override),
+                         "algo_kwargs": named_permutations(algo_kwargs_to_permute),
                          "after_goal_success": ["reselect"], # "exact_goal_match_reward" "term", "reselect", "local-reselect" # only applies to train, eval terms
                          # TODO reward_func is replaced with a pure term or reselect param
                          # but we also need one for reward eval and handle it's relation to
                          # goal selection methods
-                         "buffer_size": [10_000_000],
-                         "baseline_override": ["grid-novelty"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
-                         "range_as_goal": [True], # only works with uniform goal selection for now
+                         "baseline_override": ["base-rl"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
+                         "range_as_goal": [False], # only works with uniform goal selection for now
                          #"algo_override": [PPO],
                          "n_sampled_goal": [4],
-                         "t2g_ratio": [(1, "her")], #first part ratio, last "raw" if raw or "her" on top of her ratio
+                         "t2g_ratio": [(1, "raw")], #first part ratio, last "raw" if raw or "her" on top of her ratio
                          }
 
     base_path = "./output/wrapper/"
 
     experiment_list = named_permutations(params_to_permute)
+
+    wandb.login()
+    # wandb.tensorboard.patch(root_logdir=os.path.join(base_path))
 
     # run test runs first to confirm needed number of experiments
     full_experiment_list = []
@@ -918,20 +1115,23 @@ if __name__ == '__main__':
     total_time = 0 # in seconds
     for i, conf in enumerate(full_experiment_list):
         print("Training with configuration: " + str(conf))
-        start_time = time.time()
+        start_time = time.monotonic()
 
         train(base_path = base_path,
               verbose = 0,
               eval_seed = 2, # seeds 2,3 on the easeir side in path MC, seed 0 at the bottom, 4 on hard side
               **conf)
 
-        time_used = time.time() - start_time
+        time_used = time.monotonic() - start_time
         total_time += time_used
-        part_time = time.strftime('%H:%M:%S', time.gmtime(time_used))
+        #part_time = time.strftime('%H:%M:%S', time.gmtime(time_used))
+        part_time = timedelta(seconds=time_used)
         print(f"--- latest experiment took {part_time} ---")
         total_estimate = total_time/(i+1) * len(full_experiment_list)
-        completed_time = time.strftime('%H:%M:%S', time.gmtime(total_time))
-        total_time_estimate = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
+        #completed_time = time.strftime('%H:%M:%S', time.gmtime(total_time))
+        #total_time_estimate = time.strftime('%H:%M:%S', time.gmtime(total_estimate))
+        completed_time = timedelta(seconds=total_time)
+        total_time_estimate = timedelta(seconds=total_estimate)
         print(f"--- {i+1}/{len(full_experiment_list)} experiments have been " \
             + f"completed in {completed_time}/{total_time_estimate} (total time estimated) ---")
 

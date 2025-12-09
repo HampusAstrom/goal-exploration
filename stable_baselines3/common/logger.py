@@ -12,6 +12,8 @@ import matplotlib.figure
 import numpy as np
 import pandas
 import torch as th
+import wandb
+import wandb.wandb_run
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -442,6 +444,71 @@ class TensorBoardOutputFormat(KVWriter):
             self.writer.close()
             self._is_closed = True
 
+class WeightsAndBiasesOutputFormat(KVWriter):
+    """
+    Dumps key/value pairs into TensorBoard's numeric format.
+
+    :param folder: the folder to write the log to
+    """
+
+    def __init__(self, folder: str, run: wandb.wandb_run.Run):
+        # not using folder yet... since run is premade before...
+        self.run = run
+
+    def write(self, key_values: Dict[str, Any], key_excluded: Dict[str, Tuple[str, ...]], step: int = 0) -> None:
+        assert not self.run._is_finished, "WandD run is finished, please re-create or restart."
+        to_log_dict = {}
+        for (key, value), (_, excluded) in zip(sorted(key_values.items()), sorted(key_excluded.items())):
+            if excluded is not None and "wandb" in excluded:
+                continue
+
+            to_log_dict[key] = value
+
+            # if isinstance(value, np.ScalarType):
+            #     if isinstance(value, str):
+            #         # str is considered a np.ScalarType
+            #         self.writer.add_text(key, value, step)
+            #     else:
+            #         self.writer.add_scalar(key, value, step)
+
+            # if isinstance(value, th.Tensor):
+            #     self.writer.add_histogram(key, value, step)
+
+            # if isinstance(value, Video):
+            #     self.writer.add_video(key, value.frames, step, value.fps)
+
+            # if isinstance(value, Figure):
+            #     self.writer.add_figure(key, value.figure, step, close=value.close)
+
+            # if isinstance(value, Image):
+            #     self.writer.add_image(key, value.image, step, dataformats=value.dataformats)
+
+            # if isinstance(value, HParam):
+            #     # we don't use `self.writer.add_hparams` to have control over the log_dir
+            #     experiment, session_start_info, session_end_info = hparams(value.hparam_dict, metric_dict=value.metric_dict)
+            #     self.writer.file_writer.add_summary(experiment)
+            #     self.writer.file_writer.add_summary(session_start_info)
+            #     self.writer.file_writer.add_summary(session_end_info)
+
+        # Flush the output to the file
+        # self.writer.flush()
+
+        self.run.log(to_log_dict, step=step)
+        # TODO this has an issue with steps not increasing monotonically...
+        # TODO might need to do the logging here without commit somehow or even
+        # outside of run, and then gather up and commit (with the right steps
+        # somehow) and commit in end of the CallbackList?
+        #self.run.log({}, commit=True)
+
+    def close(self) -> None:
+        """
+        closes the file
+        """
+        # if self.writer:
+        #     self.writer.close()
+        #     self._is_closed = True
+        pass
+        # should we do a self.run.finish() here?
 
 def make_output_format(_format: str, log_dir: str, log_suffix: str = "") -> KVWriter:
     """
@@ -463,6 +530,8 @@ def make_output_format(_format: str, log_dir: str, log_suffix: str = "") -> KVWr
         return CSVOutputFormat(os.path.join(log_dir, f"progress{log_suffix}.csv"))
     elif _format == "tensorboard":
         return TensorBoardOutputFormat(log_dir)
+    elif isinstance(_format, wandb.wandb_run.Run):
+        return WeightsAndBiasesOutputFormat(log_dir, _format)
     else:
         raise ValueError(f"Unknown format specified: {_format}")
 

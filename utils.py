@@ -7,12 +7,163 @@ import argparse
 from cycler import cycler
 from itertools import combinations
 import functools
+from copy import deepcopy
+from mergedeep import merge as deepmerge
+from mergedeep import Strategy as MergeStrat
+from deepdiff import DeepDiff, Delta
+from deepdiff.operator import BaseOperatorPlus
+from pprint import pprint
 
-from typing import List
+from typing import List, Any
 from scipy.ndimage import gaussian_filter
 import scipy.stats as stats
 
 eval_freq = 0
+
+def replace_type_in_dict_from(dct1: dict, dct2: dict, type=list, sort=True):
+    if sort: # assure sorted dict while we are looping deeply
+        dct1 = dict(sorted(dct1.items()))
+    for key, val in dct1.items():
+        if isinstance(val, type):
+            dct1[key] = dct2[key]
+        if isinstance(val, dict) and key in dct2:
+            dct1[key] = replace_type_in_dict_from(dct1[key], dct2[key], type)
+    return dct1
+
+def first_unique(str1, str2, at_least=3):
+    # return first unique strings from start of both strings, assumes existance
+    # though at_least # chars, skipped for now
+    index = next((i for i, (char1, char2) in enumerate(zip(str1, str2)) if char1 != char2), None)
+    if index is None:
+        index = min(len(str1), len(str2))
+    uq_int1 = min(index, len(str1))
+    uq_int2 = min(index, len(str2))
+    index = max(index+1, at_least)
+    index1 = min(index, len(str1))
+    index2 = min(index, len(str2))
+    return str1[:index1], str2[:index2], uq_int1, uq_int2
+
+def find_short_strs(str_lst: list[str], sep="_"):
+    if len(str_lst) < 1: # TODO this might be wrong
+        return ""
+    str_lst = sorted(str_lst)
+    # find a short unique representation of each string in list
+    # first letters if 3 or less
+    # if multiple words divided by "_" first letter of each (or some of)
+    # first letter +_+ first different part after a "_"?
+
+    # first group by shared start of strings
+    prev = str_lst[0]
+    begin = {prev: ""}
+    ind_for_uniq = {prev: 0}
+    for s in str_lst[1:]:
+        beg1, beg2, ind1, ind2 = first_unique(prev, s)
+        if ind1 > ind_for_uniq[prev]:
+            begin[prev] = beg1
+            ind_for_uniq[prev] = ind1
+        begin[s] = beg2
+        ind_for_uniq[s] = ind2
+        prev = s
+
+    all_options = {key: [val] for key, val in begin.items()}
+
+    # find reps that come from splitting on "_"
+    # there is no guarantee these are unique
+    splits = {}
+    for s in str_lst:
+        if sep in s:
+            parts = s.split(sep=sep)
+            splits[s] = "".join([string[0] for string in parts])
+            all_options[s].append(splits[s])
+
+    # first letter + first x letters of unique part after a "_"
+    start_plus_unique = {}
+    for s in str_lst:
+        if ind_for_uniq[s] < len(s):
+            ind = max(ind_for_uniq[s]-2, s.find("_")+1)
+            end = s[ind:]
+            mx = min(len(end), 3)
+            start_plus_unique[s] = s[0] + sep + end[:mx]
+            all_options[s].append(start_plus_unique[s])
+
+    final = begin
+    # select reps, and make sure the different types above didn't create the
+    # same string
+    # go through all options, useing begin as default (as it is only one
+    # guaranteed to be unique and sorted), find those with worst options
+    # and give them replacements first, with target being 3 chars long as ideal
+    begin_by_len = dict(sorted(begin.items(), key=lambda x: -len(x[1])))
+    for key, val in begin_by_len.items():
+        weight_for_obts = np.array([abs(len(val)-3) for val in all_options[key]])
+        if (weight_for_obts < abs(len(val)-3)).any():
+            best_ind = np.argmin(weight_for_obts)
+            best_opt = all_options[key][best_ind]
+            if best_opt not in final.values():
+                final[key] = best_opt
+
+    return final
+
+def obj2shortstr(obj: Any, info: Any):
+    # make short string of any object
+    # use shared methods for string like things, like from class name
+    # remove spaces in lists (and turn [128, 128] into 2x128 when possible)
+    # make several options and use shortest one
+    # numbers should go from 100.1 -> 1e2, at least when just number (not in list)
+    if isinstance(obj, dict):
+        return "{" + to_short_string(obj, info) + "}"
+    elif isinstance(obj, str):
+        return obj[:min(len(obj), 3)]
+    elif isinstance(obj, bool):
+        if obj == True:
+            return ""
+        else:
+            return "F"
+    elif isinstance(obj, (float, int)):
+        if (obj <= 0.01 or obj >= 999):
+            string = np.format_float_scientific(obj,trim="-",
+                                                exp_digits=1,
+                                                precision=1,
+                                                sign=False,
+                                                )
+            return string.replace("+","")
+        else:
+            return str(obj)
+    elif isinstance(obj, type):
+        name = obj.__name__
+        return name[:min(len(name), 3)]
+    elif isinstance(obj, list):
+        return "[" + ",".join([str(val) for val in obj]) + "]"
+    else:
+        string = str(obj)
+        return string[:min(len(string),3)]
+
+# TODO turn selected Delta of configs into diff dict and then group name
+# possbible entries in Delta:
+# iterable_item_added iterable_item_moved iterable_item_removed
+# set_item_added set_item_removed dictionary_item_added dictionary_item_removed
+# attribute_added attribute_removed type_changes values_changed
+# iterable_items_added_at_indexes iterable_items_removed_at_indexes
+def to_short_string(dct: dict, ref_dct: dict=None):
+    # assumes sorted dicts for now, to get same thing each time
+    if ref_dct and isinstance(ref_dct, dict):
+        keys = list(ref_dct.keys())
+        for key in dct.keys():
+            if key not in keys:
+                keys.append(key)
+    else:
+        keys = list(dct.keys())
+        ref_dct = {}
+
+    key2str = find_short_strs(keys)
+    ret_str = ""
+    for key, val in dct.items():
+        ret_str += key2str[key]
+        ret_str += obj2shortstr(val, info=ref_dct.get(key))
+        ret_str += "|"
+    # remove last |
+    ret_str = ret_str[:-1]
+    return ret_str
+
 
 # TODO possibly use jax again?
 def symlog(x):
@@ -87,6 +238,26 @@ def put_some_last(names, put_last):
     new_names += add_last
     names = new_names
     return names, add_last
+
+def dict2string(dictionary, div="|"):
+    options = ""
+    pre = ""
+    for key, val in dictionary.items():
+        if isinstance(val, list):
+            options += pre + key + "[" + ",".join(str(v) for v in val) + "]"
+        elif isinstance(val, dict):
+            options += pre + key + "{" + dict2string(val,div=",") + "}"
+        elif isinstance(val, bool):
+            if val is True:
+                options += pre + key
+            else:
+                options += pre + key + "False"
+        elif isinstance(val, (float, int)) and (val <= 1e-2 or val >= 9e3):
+            options += pre + key + np.format_float_scientific(val,trim="-",exp_digits=1)
+        else:
+            options += pre + key + str(val)
+        pre = div
+    return options
 
 def collect_dfr_data(experiments, eval_type="eval_logs", func=None):
     # this is only for base-rl
