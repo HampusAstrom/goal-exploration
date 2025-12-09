@@ -2,6 +2,7 @@ import numpy as np
 import utils
 import matplotlib.pyplot as plt
 import torch as th
+import re
 
 from goal_wrapper import FiveXGoalSelection
 import scipy.stats as stats
@@ -279,3 +280,46 @@ plot_goals(goals)
 alpha = 0.05
 for n in range(25):
     print(stats.t.ppf(1-(alpha/2), df=n-1))
+
+def regex_each(regex, s_lst, keep=True, op=re.search):
+    match_lst = []
+    for s in s_lst:
+        if keep and op(regex, s):
+            print(f"keeping {op(regex, s)}")
+            match_lst.append(s)
+        elif not keep and op(regex, s):
+            print(f"inverse {op(regex, s)}")
+            match_lst.append(s)
+    if keep:
+        return match_lst
+    else:
+        return [s for s in s_lst if s not in match_lst]
+
+strs = ["test", "eval/0", "eval/0_", "eval/1_"]
+
+print("Regex test")
+new_tags = regex_each(r'(/\d)', strs)
+print(*new_tags, sep='\n')
+print()
+part = regex_each("(/0_)", new_tags, False)
+print(*part, sep='\n')
+both = regex_each("(/0_|/1_)", new_tags, False)
+print(*both, sep='\n')
+
+print()
+
+
+a = "testing"
+b = "testy"
+c, d = utils.first_unique(a,b)
+print(c + " " + d)
+
+a = "testing"
+b = "te"
+c, d = utils.first_unique(a,b)
+print(c + " " + d)
+
+a = "taste"
+b = "tea"
+c, d = utils.first_unique(a,b)
+print(c + " " + d)
