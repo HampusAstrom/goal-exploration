@@ -9,6 +9,8 @@ import utils
 from torch import nn
 from copy import deepcopy
 from pprint import pprint
+import argparse
+from functools import partial
 
 from stable_baselines3 import SAC, HerReplayBuffer, DQN, PPO
 from stable_baselines3.dqn import DQNwithICM
@@ -144,10 +146,14 @@ def train(base_path: str = "./data/wrapper/",
           algo_override = None,
           n_sampled_goal = 4, # Create 4 artificial transitions per real transition
           t2g_ratio = (1, "raw"), # train2gather ratio, first ratio, last "her" if mult with her_factor
+          test_run = False,
           algo_kwargs =  None,
          ):
 
-    base_path = os.path.join(base_path,env_id)
+    if test_run:
+        base_path = os.path.join(base_path,env_id+"|test_run")
+    else:
+        base_path = os.path.join(base_path,env_id)
     n_training_envs = 1
     n_eval_envs = 5
 
@@ -817,6 +823,9 @@ def train(base_path: str = "./data/wrapper/",
     if env_params_override is not None:
         proj_name += "|" + utils.dict2string(env_params_override)
 
+    if test_run:
+        proj_name += "|test_run"
+
     run = wandb.init( # TODO determine how to do this best
         project=proj_name,
         dir=os.path.join(base_path, options, experiment, "wandb_logs"),
@@ -1004,6 +1013,9 @@ def confirm():
     return answer == "y"
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-t', '--test_run', action='store_true')
+    args = parser.parse_args()
     profile = False
     if profile:
         yappi.start()
@@ -1094,6 +1106,9 @@ if __name__ == '__main__':
     wandb.login()
     # wandb.tensorboard.patch(root_logdir=os.path.join(base_path))
 
+    if args.test_run:
+        print("This is a test run")
+
     # run test runs first to confirm needed number of experiments
     full_experiment_list = []
     total_planned = 0
@@ -1102,6 +1117,7 @@ if __name__ == '__main__':
         completed_exps = train(base_path = base_path,
                                verbose = 0,
                                test_needed_experiments = True,
+                               test_run = args.test_run,
                                **conf)
         total_planned += conf["experiments"]
         total_found += min(len(completed_exps), conf["experiments"])
@@ -1120,6 +1136,7 @@ if __name__ == '__main__':
         train(base_path = base_path,
               verbose = 0,
               eval_seed = 2, # seeds 2,3 on the easeir side in path MC, seed 0 at the bottom, 4 on hard side
+              test_run = args.test_run,
               **conf)
 
         time_used = time.monotonic() - start_time
