@@ -15,7 +15,7 @@ from functools import partial
 from stable_baselines3 import SAC, HerReplayBuffer, DQN, PPO
 from stable_baselines3.dqn import DQNwithICM
 from stable_baselines3.sac import SACwithICM
-from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
+from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback, MetaEvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_checker import check_env
@@ -612,6 +612,39 @@ def train(base_path: str = "./data/wrapper/",
         else:
             name = ""
 
+        # meta_eval steps to get window average over thresh
+        if True:
+            window = 10
+            windowed_reward_n = f"avg_reward_for_{window}_evals"
+            func = np.mean
+            meta_callback = MetaEvalCallback(eval_func=func,
+                                            vars_to_eval="last_mean_reward",
+                                            log_name=windowed_reward_n,
+                                            window=window,
+                                            log_val=True,
+                                            #log_best="+",
+                                            #log_step="-",
+                                            #step_of_bool="-"
+                                            )
+
+        if False:
+            window = 5
+            thresh = -130
+            if window is not None and window > 0:
+                windowed_reward_n = f"avg_reward_over_{thresh}_for_{window}_evals"
+            else:
+                windowed_reward_n = f"over_reward_{thresh}_for_{window}_evals"
+            func = partial(utils.check_threshold, thresh=thresh)
+            meta_callback = MetaEvalCallback(eval_func=func,
+                                            vars_to_eval="last_mean_reward",
+                                            log_name=windowed_reward_n,
+                                            window=window,
+                                            log_val=False,
+                                            #log_best="+",
+                                            #log_step="-",
+                                            step_of_bool="-"
+                                            )
+
         # Create callback that evaluates agent for 5 episodes every 500 training environment steps.
         # When using multiple training environments, agent will be evaluated every
         # eval_freq calls to train_env.step(), thus it will be evaluated every
@@ -626,7 +659,9 @@ def train(base_path: str = "./data/wrapper/",
                                     deterministic=True,
                                     render=False,
                                     verbose=verbose,
-                                    seed=eval_seed)
+                                    seed=eval_seed,
+                                    callback_after_eval=meta_callback,
+                                    )
 
         return eval_callback
 
@@ -677,6 +712,7 @@ def train(base_path: str = "./data/wrapper/",
     learning_starts = 500
     if "max_episode_steps" in env_params:
         learning_starts = max(learning_starts, env_params["max_episode_steps"])
+
     algo_kwargs_default = dict(
         learning_starts=500, #300
         verbose=verbose,
@@ -1019,41 +1055,35 @@ if __name__ == '__main__':
     profile = False
     if profile:
         yappi.start()
-    #experiments = ["test15",] #["exp1", "exp2", "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", ]
-    #fixed_goal_fractions = [0.0,] #[0.0, 0.1, 0.5, 0.9, 1.0]
-    #device = ["cpu", "cuda"]
-    weights = [1, 1, 1, 1, 1]
-    temp = utils.weight_combinations(weights, 1)
-    temp.append([1, 1, 1, 1, 1])
 
-    # goal_conf_to_permute = {"exploit_dist": [0.2,],
-    #                         "expand_dist": [0.01,],
-    #                         "component_weights": [[0, 0, 0, 0, 1],
-    #                                             #   [1, 1, 1, 1, 0],
-    #                                             #   [0, 1, 1, 1, 0],
-    #                                             #   [1, 1, 0, 1, 0],
-    #                                             #   [1, 0, 0, 1, 0],
-    #                                             #   [1, 1, 0, 1, 0],
-    #                                             #   [0, 0, 0, 1, 0],
-    #                                             #   [1, 0, 0, 0, 1],
-    #                                             #   [1, 0, 0, 1, 0],
-    #                                             #   [0, 0, 0, 1, 1],
-    #                                             #   [1, 0, 0, 0, 0],
-    #                                             #   [0, 0, 0, 0, 1],
-    #                                              ],
-    #                         # "component_weights": utils.weight_combinations(weights, 2),
-    #                         # "component_weights": temp,
-    #                         "steps_halflife": [500,],
-    #                         "escalate_exploit": [True],
-    #                         "norm_comps": [True],
-    #                         }
+    # temp note of params that worked for Acrobot
+    # policy_kwargs_to_permute=dict(
+    #     net_arch=[[80],] # [80], [32, 32],[128, 128], [64, 64], [64, 64, 64],
+    # )
+
+    # algo_kwargs_to_permute = dict(
+    #     policy_kwargs=named_permutations(policy_kwargs_to_permute),
+    #     learning_rate=[1e-3,], #1e-3
+    #     batch_size=[200], # 256
+    #     buffer_size=[5_000,],
+    #     target_update_interval=[100], # 10,100,200,500,1000
+    #     gamma=[0.99,], # 0.95, 0.99,0.999
+    #     exploration_fraction=[0.25,], # 0.5,0.2,0.1
+    #     exploration_initial_eps=[1.0], # 1,0.1,0.01,
+    #     exploration_final_eps=[0.01],
+    #     train_freq=[1,], # 1,3,10,30
+    #     double_dqn=[False],
+    #     learning_starts=[500], # 500,1000,3000,10_000
+    #     #tau=[0.2,0.3], # 1.0, 0.5, 0.1
+    # )
+
     goal_conf_to_permute = {"grid_size": [100],
                             "fraction_random": [0.01], # 0.01
                             #"target_success_rate": [0.75], # turn on if intermediate instead of novelty # 0.75
                             "dist_decay": [2],
                             }
 
-    env_id = "PathologicalMountainCar-v1.1" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    env_id = "MountainCar-v0" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
     # TODO get updated gym envs with cliffwalking v1
 
     env_params_override = {"max_episode_steps": [1000]}
@@ -1065,16 +1095,16 @@ if __name__ == '__main__':
     algo_kwargs_to_permute = dict(
         policy_kwargs=named_permutations(policy_kwargs_to_permute),
         learning_rate=[1e-3,], #1e-3
-        batch_size=[200], # 256
-        buffer_size=[5_000,],
+        batch_size=[128], # 256
+        buffer_size=[50_000,],
         target_update_interval=[100], # 10,100,200,500,1000
         gamma=[0.99,], # 0.95, 0.99,0.999
         exploration_fraction=[0.25,], # 0.5,0.2,0.1
-        exploration_initial_eps=[1], # 1,0.1,0.01,
-        exploration_final_eps=[0.01],
+        exploration_initial_eps=[1.0], # 1,0.1,0.01,
+        exploration_final_eps=[0.001],
         train_freq=[1,], # 1,3,10,30
         double_dqn=[False],
-        learning_starts=[500], # 500,1000,3000,10_000
+        learning_starts=[5_000], # 500,1000,3000,10_000
         #tau=[0.2,0.3], # 1.0, 0.5, 0.1
     )
 

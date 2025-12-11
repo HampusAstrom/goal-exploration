@@ -20,6 +20,26 @@ import scipy.stats as stats
 
 eval_freq = 0
 
+# Helper functions for derivative logs
+
+# take mean of whatever is in vals
+# check if mean has passed threshold
+# over True means if its over, otherwise under
+def check_threshold(vals,
+                    thresh,
+                    over = True,
+                    ):
+    # whatever we get, take mean in all dimensions
+    mean_val = np.mean(vals)
+    if over and mean_val > thresh:
+        return True
+    elif not over and mean_val < thresh:
+        return True
+    else:
+        return False
+
+# end of helper functions for derivative logs
+
 def replace_type_in_dict_from(dct1: dict, dct2: dict, type=list, sort=True):
     if sort: # assure sorted dict while we are looping deeply
         dct1 = dict(sorted(dct1.items()))
