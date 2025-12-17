@@ -159,11 +159,14 @@ def train(base_path: str = "./data/wrapper/",
 
     if env_id == "PathologicalMountainCar-v1.1" or \
         env_id == "CliffWalking-v0":
-        eval_freq = 200_000 #50_000 for patho MC and Cliffwalk
+        eval_freq = 5_000 #50_000 for patho MC and Cliffwalk, at least with goals
     elif env_id == "FrozenLake-v1":
         eval_freq = 10_000
     elif env_id == "MountainCar-v0":
-        eval_freq = 2_000 #50_000
+        if baseline_override == "base-rl":
+            eval_freq = 2_000 #50_000
+        else:
+            eval_freq = 20_000
     elif env_id == "Acrobot-v1":
         eval_freq = 2_000 #50_000
     else:
@@ -1111,26 +1114,26 @@ if __name__ == '__main__':
     env_params_override = {"max_episode_steps": [1000]}
 
     policy_kwargs_to_permute=dict(
-        net_arch=[[80],] # [80], [32, 32],[128, 128], [64, 64], [64, 64, 64],
+        net_arch=[[128, 128],] # [80], [32, 32],[128, 128], [64, 64], [64, 64, 64],
     )
 
     algo_kwargs_to_permute = dict(
         policy_kwargs=named_permutations(policy_kwargs_to_permute),
-        learning_rate=[1e-3,], #1e-3
-        batch_size=[128], # 256
-        buffer_size=[50_000,],
-        target_update_interval=[100], # 10,100,200,500,1000
+        learning_rate=[2e-3,], #1e-3
+        batch_size=[256], # 256
+        buffer_size=[100_000,], # also try 400_000
+        target_update_interval=[4500], # 10,100,200,500,1000
         gamma=[0.99,], # 0.95, 0.99,0.999
-        exploration_fraction=[0.25,], # 0.5,0.2,0.1
-        exploration_initial_eps=[1.0], # 1,0.1,0.01,
+        exploration_fraction=[0.85,], # 0.5,0.2,0.1
+        exploration_initial_eps=[0.35], # 1,0.1,0.01,
         exploration_final_eps=[0.001],
-        train_freq=[1,], # 1,3,10,30
-        double_dqn=[False],
-        learning_starts=[5_000], # 500,1000,3000,10_000
+        train_freq=[15,], # 1,3,10,30
+        double_dqn=[True],
+        learning_starts=[17_000], # 500,1000,3000,10_000
         #tau=[0.2,0.3], # 1.0, 0.5, 0.1
     )
 
-    params_to_permute = {"experiments": [20],
+    params_to_permute = {"experiments": [25],
                          "env_id": [env_id],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cpu"],
@@ -1145,7 +1148,7 @@ if __name__ == '__main__':
                          # but we also need one for reward eval and handle it's relation to
                          # goal selection methods
                          "baseline_override": ["base-rl"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
-                         "range_as_goal": [False], # only works with uniform goal selection for now
+                         "range_as_goal": [True], # only works with uniform goal selection for now
                          #"algo_override": [PPO],
                          "n_sampled_goal": [4],
                          "t2g_ratio": [(1, "raw")], #first part ratio, last "raw" if raw or "her" on top of her ratio
