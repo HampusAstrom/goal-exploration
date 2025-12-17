@@ -769,6 +769,10 @@ def train(base_path: str = "./data/wrapper/",
     diff_dict = utils.replace_type_in_dict_from(diff_dict, algo_kwargs_merged)
     group_name = utils.to_short_string(diff_dict, temp)
 
+    # TODO if group name over 128 characters, deal with it better
+    if len(group_name) > 128:
+        group_name = group_name[:128]
+
     print(f"Group name: {group_name}")
 
     model = algo(policy,

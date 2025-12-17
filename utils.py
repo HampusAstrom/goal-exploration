@@ -186,7 +186,7 @@ def find_short_strs(str_lst: list[str], sep="_"):
 
     return final
 
-def obj2shortstr(obj: Any, info: Any):
+def obj2shortstr(obj: Any, info: Any = None):
     # make short string of any object
     # use shared methods for string like things, like from class name
     # remove spaces in lists (and turn [128, 128] into 2x128 when possible)
@@ -202,13 +202,20 @@ def obj2shortstr(obj: Any, info: Any):
         else:
             return "F"
     elif isinstance(obj, (float, int)):
-        if (obj <= 0.01 or obj >= 999):
-            string = np.format_float_scientific(obj,trim="-",
+        abs_obj = np.abs(obj)
+        if (abs_obj <= 0.01 or abs_obj >= 999):
+            string = np.format_float_scientific(obj,
+                                                trim="-",
                                                 exp_digits=1,
                                                 precision=1,
                                                 sign=False,
                                                 )
             return string.replace("+","")
+        elif isinstance(obj, float):
+            if abs_obj >= 10:
+                return f"{obj:.0g}"
+            else:
+                return f"{obj:.2g}"
         else:
             return str(obj)
     elif isinstance(obj, type):
