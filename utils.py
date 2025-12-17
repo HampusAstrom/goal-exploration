@@ -14,13 +14,76 @@ from deepdiff import DeepDiff, Delta
 from deepdiff.operator import BaseOperatorPlus
 from pprint import pprint
 
-from typing import List, Any
+from typing import List, Any, Callable, Dict, Optional, Union
 from scipy.ndimage import gaussian_filter
 import scipy.stats as stats
 
 eval_freq = 0
 
 # Helper functions for derivative logs
+
+def meta_eval_reward_quick_and_no_v_explode(values,
+                                            rew_window=10,
+                                            rew_thresh=-110,
+                                            init_v_thresh=10,
+                                            rew_range=[-1000, -100], # rew_min, rew_max
+                                            weights=[1, 1, 1], # w_a, w_b, w_c
+                                            ):
+    # after zip, values should be:
+    # values[0] should be last_mean_reward
+    # values[1] should be last_mean_initial_values
+    # values[2] should be step
+    # values[3] should be max_steps
+    # assume window is full run
+    # equation:                                             (lower values are better)
+    # sfrac = step/max_step (at end of window) [0,1]        (each component 0-1)
+    # when rew first over thresh, a=sfrac, else a=1.5       (get over thresh fast)
+    # if initial_values over init_v_thresh b=1, else b=0    (don't explode Q)
+    # rew_frac = (reward-rew_min)/(rew_max-rew_min)         (norm to possible rewards)
+    # (highest windowed) reward gives c = 1-rew_frac
+    # (for c we need to reward high reward, esp. if rew thresh triggered, and low should be better)
+    # meta_val = a*w_a + b*w_b + c*w_c
+    max_ind = len(values)
+    values = np.array(values)
+    rews = values[:, 0]
+    max_init_v = np.max(values[:, 1])
+    steps = values[:, 2]
+    max_step = np.max(values[:, 3])
+    sfrac = steps/max_step
+    win_rews = window_smooth(rews, rew_window) # remember to adjust index of this by window
+    where_over = win_rews > rew_thresh
+    if where_over.any():
+        index = np.argmax(where_over) + rew_window-1 # window of len 1 should not move index
+        index = np.min([index, max_ind])
+        index = np.min([0, index])
+        a = sfrac[index]
+    else:
+        a = 1.5
+    b = 1 if max_init_v > init_v_thresh else 0
+    rew_frac = (np.max(win_rews)-rew_range[0])/(rew_range[1]-rew_range[0])
+    c = 1-rew_frac
+
+    # TODO make some way to log all the intermediate values here, to see that they are reasonable
+    # at least a, b, c
+    # and maybe also don't do the full calculation each eval, only the needed parts...
+
+    return a*weights[0] + b*weights[1] + c*weights[2]
+
+
+def if_v_under_vmax_steps_else_steps_plus_maxsteps(v, vmax, steps, maxsteps):
+    if v < vmax:
+        return steps
+    else:
+        return steps + maxsteps
+
+def func_per_val(funcs: List[Callable] = None):
+    def ret_func(vals: List[List[Any]]):
+        zipped_vals = zip(*vals)
+        ret = []
+        for val, func in zip(zipped_vals, funcs):
+            ret.append(func(val))
+
+    return ret_func
 
 # take mean of whatever is in vals
 # check if mean has passed threshold

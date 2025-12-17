@@ -612,8 +612,26 @@ def train(base_path: str = "./data/wrapper/",
         else:
             name = ""
 
-        # meta_eval steps to get window average over thresh
+        # call dedicated utility function: meta_eval_reward_quick_and_no_v_explode
         if True:
+            meta_eval_n = "meta_eval/meta_value"
+            func = utils.meta_eval_reward_quick_and_no_v_explode
+            meta_callback = MetaEvalCallback(eval_func=func,
+                                            vars_to_eval=["last_mean_reward",
+                                                          "last_mean_initial_values",
+                                                          "n_calls",
+                                                          "num_timesteps",
+                                                          ],
+                                            log_name=meta_eval_n,
+                                            window=steps,
+                                            log_val=True,
+                                            #log_best="+",
+                                            #step_of_bool="-"
+                                            log_on_end_only=True,
+                                            )
+
+        # meta_eval steps to get window average of reward
+        if False:
             window = 10
             windowed_reward_n = f"avg_reward_for_{window}_evals"
             func = np.mean
@@ -622,11 +640,11 @@ def train(base_path: str = "./data/wrapper/",
                                             log_name=windowed_reward_n,
                                             window=window,
                                             log_val=True,
-                                            #log_best="+",
-                                            #log_step="-",
+                                            log_best="+",
                                             #step_of_bool="-"
                                             )
 
+        # meta_eval steps to get window average over thresh
         if False:
             window = 5
             thresh = -130

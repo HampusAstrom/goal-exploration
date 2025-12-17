@@ -174,6 +174,10 @@ class EventCallback(BaseCallback):
     def _on_step(self) -> bool:
         return True
 
+    def _on_training_end(self) -> None:
+        if self.callback is not None:
+            self.callback.on_training_end()
+
     def update_child_locals(self, locals_: Dict[str, Any]) -> None:
         """
         Update the references to the local variables.
@@ -696,7 +700,7 @@ class StopTrainingOnNoModelImprovement(BaseCallback):
 
         return continue_training
 
-class MetaEvalCallback(BaseCallback):
+class MetaEvalCallback(EventCallback):
     """
     Runs meta analysis on data in parent or object and outputs extra meta_eval/
     to the logger
@@ -705,7 +709,7 @@ class MetaEvalCallback(BaseCallback):
     """
 
     obj: Any
-    parent: EvalCallback
+    parent: BaseCallback
 
     def __init__(self,
                  eval_func: Callable,
@@ -717,10 +721,12 @@ class MetaEvalCallback(BaseCallback):
                  log_val: bool = True,
                  log_best: str = None, # takes None (no), "+", "-",
                  step_of_bool: str = None, # takes None (no), "+", "-"
+                 log_on_end_only: bool = False,
                  obj: Any = None, # override if not using data from parent
+                 callback: Optional[BaseCallback] = None,
                  verbose: int = 0,
                  ):
-        super().__init__(verbose=verbose)
+        super().__init__(callback=callback, verbose=verbose)
         self.eval_func = eval_func
         if isinstance(vars_to_eval, str):
             self.vars_to_eval = [vars_to_eval]
@@ -732,8 +738,11 @@ class MetaEvalCallback(BaseCallback):
         self.log_best = log_best
         self.step_of_bool = step_of_bool
         self.init_obj = obj
+        self.log_on_end_only = log_on_end_only
+        self.last_func_ret = None
 
         self.values = []
+        self.last_values = None
         if self.log_best is not None:
             assert isinstance(self.log_best, str)
             if self.log_best == "-":
@@ -762,7 +771,11 @@ class MetaEvalCallback(BaseCallback):
             self.obj = self.parent
         else:
             self.obj = self.init_obj
-        # TODO
+
+        if self.callback is not None:
+            return self.callback.init_callback()
+
+        # TODO add log_path stuff
 
     def _on_step(self) -> bool:
         assert self.obj is not None, "``MetaEvalCallback`` callback must be used with an object to get data from"
@@ -775,6 +788,7 @@ class MetaEvalCallback(BaseCallback):
             latest_vals.append(getattr(self.obj, var))
 
         self.values.append(latest_vals)
+        self.last_values = latest_vals
 
         if self.window is not None:
             window = min(len(self.values), self.window)
@@ -784,6 +798,7 @@ class MetaEvalCallback(BaseCallback):
 
         # run func on it
         func_ret = self.eval_func(vals)
+        self.last_func_ret = func_ret
 
         # we grab step, if we need it
         step = getattr(self.obj, "n_calls")
@@ -791,8 +806,8 @@ class MetaEvalCallback(BaseCallback):
         # TODO do np.savez stuff if used (if log_dir)
 
         # log
-        if self.log_val:
-            self.logger.record("meta_eval/"+self.log_name, func_ret)
+        if self.log_val and not self.log_on_end_only:
+            self.logger.record(self.log_name, func_ret)
             logged_anything = True
 
         # check and log best_step_where_true
@@ -800,9 +815,10 @@ class MetaEvalCallback(BaseCallback):
             if (self.step_of_bool == "-" and step < self.best_step_where_true) or \
                (self.step_of_bool != "-" and step > self.best_step_where_true):
                 self.best_step_where_true = step
-                word = "first" if self.step_of_bool == "-" else "last"
-                self.logger.record("meta_eval/"+self.log_name+f"_{word}_true_at_step", self.best_step_where_true)
-                logged_anything = True
+                if not self.log_on_end_only:
+                    word = "first" if self.step_of_bool == "-" else "last"
+                    self.logger.record(self.log_name+f"_{word}_true_at_step", self.best_step_where_true)
+                    logged_anything = True
 
         # check and log if new best
         if self.log_best:
@@ -810,18 +826,22 @@ class MetaEvalCallback(BaseCallback):
                (self.log_best != "-" and func_ret > self.best_val):
                 self.best_val = func_ret
                 self.best_step = step
-                self.logger.record("meta_eval/"+self.log_name+"_best", self.best_val)
-                self.logger.record("meta_eval/"+self.log_name+"_best_at_step", self.best_step)
-                logged_anything = True
+                if not self.log_on_end_only:
+                    self.logger.record(self.log_name+"_best", self.best_val)
+                    self.logger.record(self.log_name+"_best_at_step", self.best_step)
+                    logged_anything = True
         # TODO should we log best each step anyway, or just when it changes?
 
         # Dump logged data
         if logged_anything:
             self.logger.dump(self.num_timesteps)
 
+        if self.callback is not None:
+            self.on_step()
+
         return continue_training
 
-    def OFF_on_training_end(self) -> None: # OBS turned off for now!
+    def _on_training_end(self) -> None:
         # for conditional values, we need to log something if we never reached threshold
         # should we just send inf/-inf for best val, and high/low step for best_step_where_true?
         # let's give it a try
@@ -829,17 +849,35 @@ class MetaEvalCallback(BaseCallback):
         logged_anything = False
         if self.step_of_bool is not None and np.abs(self.best_step_where_true) == np.inf:
             word = "first" if self.step_of_bool == "-" else "last"
-            self.logger.record("meta_eval/"+self.log_name+f"_{word}_true_at_step", self.best_step_where_true)
+            self.logger.record(self.log_name+f"_{word}_true_at_step", self.best_step_where_true)
             logged_anything = True
 
         if self.log_best and np.abs(self.best_val) == np.inf:
-            self.logger.record("meta_eval/"+self.log_name+"_best", self.best_val)
-            self.logger.record("meta_eval/"+self.log_name+"_best_at_step", np.inf)
+            self.logger.record(self.log_name+"_best", self.best_val)
+            self.logger.record(self.log_name+"_best_at_step", np.inf)
             logged_anything = True
+
+        if self.log_on_end_only:
+            if self.log_val:
+                self.logger.record(self.log_name, self.last_func_ret)
+                logged_anything = True
+
+            if self.step_of_bool:
+                word = "first" if self.step_of_bool == "-" else "last"
+                self.logger.record(self.log_name+f"_{word}_true_at_step", self.best_step_where_true)
+                logged_anything = True
+
+            if self.log_best:
+                self.logger.record(self.log_name+"_best", self.best_val)
+                self.logger.record(self.log_name+"_best_at_step", self.best_step)
+                logged_anything = True
 
         # Dump logged data
         if logged_anything:
             self.logger.dump(self.num_timesteps)
+
+        if self.callback is not None:
+            self.on_training_end()
 
 
 class ProgressBarCallback(BaseCallback):
