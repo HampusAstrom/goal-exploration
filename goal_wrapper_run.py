@@ -11,6 +11,7 @@ from copy import deepcopy
 from pprint import pprint
 import argparse
 from functools import partial
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 
 from stable_baselines3 import SAC, HerReplayBuffer, DQN, PPO
 from stable_baselines3.dqn import DQNwithICM
@@ -42,6 +43,15 @@ def stack(arrays, axis=0, out=None, *, dtype=None, casting="same_kind"):
         return np.array([[]])
     else:
         return np.stack(arrays, axis, out, dtype=None, casting="same_kind")
+
+def algo_for_env(env_id: str, env_kwargs: dict={}):
+    env = gym.make(env_id, **env_kwargs)
+    if isinstance(env.action_space, gym.spaces.Box):
+        return SAC
+    elif isinstance(env.action_space, gym.spaces.Discrete):
+        return DQN
+    else:
+        raise ValueError(f"Algorithm selector for actions space: {env.action_space} not configured")
 
 class MapGoalComponentsCallback(BaseCallback):
     def __init__(self, log_path, eval_points, dimension_names, eval_freq, goal_selector, verbose=0):
@@ -169,13 +179,15 @@ def train(base_path: str = "./data/wrapper/",
             eval_freq = 20_000
     elif env_id == "Acrobot-v1":
         eval_freq = 2_000 #50_000
+    elif env_id == "SparsePendulumEnv-v1":
+        eval_freq = 2_000
     else:
-        raise "Error, set eval_freq for this env"
+        raise ValueError("Error, set eval_freq for this env")
 
-    pend_env_params = {"harder_start": [0.1]}
-    pathmc_env_params = {"terminate": [True]}
-    frozen_env_params = {"is_slippery": [True]}
-    cliffwalker_env_params = {"max_episode_steps": [300]} # override to play nice with HER #{"is_slippery": [False]}
+    pend_env_params = {"harder_start": 0.1}
+    pathmc_env_params = {"terminate": True}
+    frozen_env_params = {"is_slippery": True}
+    cliffwalker_env_params = {"max_episode_steps": 300} # override to play nice with HER #{"is_slippery": [False]}
 
     if env_id == "SparsePendulumEnv-v1":
         env_params_default = pend_env_params
@@ -358,7 +370,7 @@ def train(base_path: str = "./data/wrapper/",
     train_env = Monitor(train_env_goal, log_dir)
     #train_env = VecMonitor(train_env, log_dir)
 
-    if env_id == "SparsePendulumEnv-v1":
+    if env_id == "SparsePendulumEnv-v1": # TODO start replacing these with funcs like algo_for_env
         fixed_goal = lambda obs: np.array([1.0, 0.0, 0.0])
         few_goals = [fixed_goal,
                      lambda obs: np.array([1.0, 0.0, 3.0]),
@@ -368,9 +380,53 @@ def train(base_path: str = "./data/wrapper/",
                        lambda obs: np.array([-0.7071, -0.7071, 0.0]),
                        lambda obs: np.array([-0.7071, 0.7071, 0.0]),
                        lambda obs: np.array([0.7071, -0.7071, 0.0]),]
+        max_goals = []
+        for func in many_goals:
+            max_goals.append(func(None))
+        if range_as_goal:
+            def to_range_goal(lst: Union[list,Callable]):
+                convert_to_lambda = False
+                if callable(lst):
+                    lst = [lst]
+                if len(lst) > 0 and callable(lst[0]):
+                    convert_to_lambda = True
+                    n_lst = []
+                    for func in lst:
+                        n_lst.append(func(None))
+                    lst = n_lst
+                ret = []
+                for point in lst:
+                    # x = point[0] # how high
+                    # y = point[1] # left positive
+                    # vel = point[2] # c-clockwise positive
+                    # x2 = x + 0.2 if x + 0.2 <= 1 else x - 0.2
+                    # ys = np.sign(y)
+                    # y2 = y + 0.1*ys if x <= 0 else y -0.1*ys
+                    # vel2 = vel + 0.3*np.sign(vel)
+                    # x_mi, x_ma = np.min([x, x2]), np.max([x, x2])
+                    # y_mi, y_ma = np.min([y, y2]), np.max([y, y2])
+                    # vel_mi, vel_ma = np.min([vel, vel2]), np.max([vel, vel2])
+                    # new_goal = np.array([x_mi, y_mi, vel_mi, x_ma, y_ma, vel_ma])
+                    min_range = [0.1, 0.1, 0.5]
+                    mi = point-np.max([np.abs(point*0.1), min_range], axis=0)
+                    ma = point+np.max([np.abs(point*0.1), min_range], axis=0)
+                    new_goal = np.array(np.concatenate((mi, ma)))
+                    if convert_to_lambda:
+                        ret.append(lambda obs: new_goal)
+                    else:
+                        ret.append(new_goal.tolist())
+
+                return ret
+
+            fixed_goal = to_range_goal(fixed_goal)
+            few_goals = to_range_goal(few_goals)
+            many_goals = to_range_goal(many_goals)
+            max_goals = to_range_goal(max_goals)
+            print(max_goals)
+
         coord_names = ["x", "y", "ang. vel."]
-        # algo = SAC
-        algo = SACwithICM
+        algo = SAC
+        # algo = SACwithICM
         if baseline_override in ["base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = SAC
     elif env_id == "PathologicalMountainCar-v1.1":
@@ -427,8 +483,8 @@ def train(base_path: str = "./data/wrapper/",
                          [-6.11123538e-01,  1.01132356e-02,  1.75906278e-01,  3.32736568e-02],
                          [-7.85424886e-01, -1.35230819e-03, -2.13653274e-01, -5.12745173e-04],]
         coord_names = ["xpos", "velocity"]
-        # algo = DQN
-        algo = DQNwithICM # TODO we are not using ICM now, don't use it in any? or start using again?
+        algo = DQN
+        # algo = DQNwithICM # TODO we are not using ICM now, don't use it in any? or start using again?
         if baseline_override in ["base-rl", "curious", "uniform-goal", "grid-novelty"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
     elif env_id == "FrozenLake-v1":
@@ -442,8 +498,8 @@ def train(base_path: str = "./data/wrapper/",
                        lambda obs: np.array([8])]
         max_goals = [i for i in range(16)]
         coord_names = ["index"]
-        # algo = DQN
-        algo = DQNwithICM
+        algo = DQN
+        # algo = DQNwithICM
         if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
     elif env_id == "CliffWalking-v0":
@@ -457,8 +513,8 @@ def train(base_path: str = "./data/wrapper/",
                        lambda obs: np.array([8])]
         max_goals = [i for i in range(48)] # TODO grab from env obs space instead
         coord_names = ["index"]
-        # algo = DQN
-        algo = DQNwithICM
+        algo = DQN
+        # algo = DQNwithICM
         if baseline_override in ["uniform-goal", "grid-novelty", "base-rl", "curious"]: # TODO this looks wrong, I don't think i use "curious" yet
             algo = DQN
     elif env_id == "MountainCar-v0":
@@ -751,7 +807,7 @@ def train(base_path: str = "./data/wrapper/",
         exploration_initial_eps=1.0,
         exploration_final_eps=0.01,
         exploration_fraction=0.5,
-        double_dqn=False,
+        double_dqn=False, # TODO should be in a DQN specific pile, added only if
     )
 
     temp = utils.deepcopy(algo_kwargs_default)
@@ -761,6 +817,9 @@ def train(base_path: str = "./data/wrapper/",
     algo_kwargs_merged = utils.deepmerge({},
                                          algo_kwargs_default,
                                          algo_kwargs)
+
+    # TODO replace with better structure later, but for now filter algo params by algo
+    utils.filter_algo_kwargs_by_algo(algo_kwargs_merged, algo)
 
     pprint(algo_kwargs_merged)
     diff = utils.DeepDiff(algo_kwargs_default,
@@ -909,6 +968,35 @@ def train(base_path: str = "./data/wrapper/",
 
     callbacks.append(wandb_callback)
 
+    if baseline_override != "base-rl":
+        meta_eval_n = "meta_eval/goal_success_rate_punish_expode"
+        # skip data from exteral reward evalcallback, wandb callback, and self
+        func = utils.meta_eval_goals
+        meta_callback = MetaEvalCallback(eval_func=func,
+                                        vars_to_eval=["last_mean_reward",
+                                                    "last_mean_initial_values",
+                                                    "last_mean_episode_disc_rewards",
+                                                    ],
+                                        log_name=meta_eval_n,
+                                        window=steps,
+                                        log_val=True,
+                                        #log_best="+",
+                                        #step_of_bool="-"
+                                        log_on_end_only=True,
+                                        slice_of_cb_list=np.s_[:-3],
+                                        eval_freq=max(eval_freq // n_training_envs, 1),
+                                        )
+        callbacks.append(meta_callback)
+
+        callback_list = CallbackList(callbacks)
+        meta_callback.set_obj(callback_list) # set meta to grab data from callback list
+    else:
+        callback_list = CallbackList(callbacks)
+
+    # temp = utils.get_nested_structure_of_callbacks(callback_list)
+    # pprint(temp)
+    # exit()
+
     # replace logger to add wandb stuff to it as well
     format_strings = os.getenv("SB3_LOG_FORMAT", "stdout,log,csv").split(",")
     format_strings.append(run) # TODO this breaks type hint for configure
@@ -918,7 +1006,7 @@ def train(base_path: str = "./data/wrapper/",
     print(model.policy)
 
     start_time = time.time()
-    model.learn(steps, callback=CallbackList(callbacks), progress_bar=True)
+    model.learn(steps, callback=callback_list, progress_bar=True)
     time_used = time.time() - start_time
     print("--- %s seconds ---" % (time_used))
     #model.learn(steps, progress_bar=True)
@@ -1108,10 +1196,12 @@ if __name__ == '__main__':
                             "dist_decay": [2],
                             }
 
-    env_id = "MountainCar-v0" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    env_id = "SparsePendulumEnv-v1" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+    #env_id = "MountainCar-v0"
     # TODO get updated gym envs with cliffwalking v1
 
-    env_params_override = {"max_episode_steps": [1000]}
+    env_params_override = {#"max_episode_steps": [1000],
+                           }
 
     policy_kwargs_to_permute=dict(
         net_arch=[[128, 128],] # [80], [32, 32],[128, 128], [64, 64], [64, 64, 64],
@@ -1129,11 +1219,11 @@ if __name__ == '__main__':
         exploration_final_eps=[0.001],
         train_freq=[15,], # 1,3,10,30
         double_dqn=[True],
-        learning_starts=[17_000], # 500,1000,3000,10_000
+        learning_starts=[1_000], # 500,1000,3000,10_000
         #tau=[0.2,0.3], # 1.0, 0.5, 0.1
     )
 
-    params_to_permute = {"experiments": [25],
+    params_to_permute = {"experiments": [5],
                          "env_id": [env_id],
                          "fixed_goal_fraction": [0.0],
                          "device": ["cpu"],
@@ -1147,7 +1237,7 @@ if __name__ == '__main__':
                          # TODO reward_func is replaced with a pure term or reselect param
                          # but we also need one for reward eval and handle it's relation to
                          # goal selection methods
-                         "baseline_override": ["base-rl"], # ["base-rl", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
+                         "baseline_override": ["uniform-goal"], # ["uniform-goal", "uniform-goal", "grid-novelty"] [None]  # should be if not doing baseline None
                          "range_as_goal": [True], # only works with uniform goal selection for now
                          #"algo_override": [PPO],
                          "n_sampled_goal": [4],

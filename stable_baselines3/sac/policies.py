@@ -218,6 +218,7 @@ class SACPolicy(BasePolicy):
         lr_schedule: Schedule,
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         use_sde: bool = False,
         log_std_init: float = -3,
         use_expln: bool = False,
@@ -270,6 +271,7 @@ class SACPolicy(BasePolicy):
                 "n_critics": n_critics,
                 "net_arch": critic_arch,
                 "share_features_extractor": share_features_extractor,
+                "out_act_fn": out_act_fn,
             }
         )
 
@@ -321,6 +323,7 @@ class SACPolicy(BasePolicy):
                 use_expln=self.actor_kwargs["use_expln"],
                 clip_mean=self.actor_kwargs["clip_mean"],
                 n_critics=self.critic_kwargs["n_critics"],
+                out_act_fn=self.critic_kwargs["out_act_fn"],
                 lr_schedule=self._dummy_schedule,  # dummy lr schedule, not needed for loading policy alone
                 optimizer_class=self.optimizer_class,
                 optimizer_kwargs=self.optimizer_kwargs,
@@ -402,6 +405,7 @@ class CnnPolicy(SACPolicy):
         lr_schedule: Schedule,
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         use_sde: bool = False,
         log_std_init: float = -3,
         use_expln: bool = False,
@@ -420,6 +424,7 @@ class CnnPolicy(SACPolicy):
             lr_schedule,
             net_arch,
             activation_fn,
+            out_act_fn,
             use_sde,
             log_std_init,
             use_expln,
@@ -468,6 +473,7 @@ class MultiInputPolicy(SACPolicy):
         lr_schedule: Schedule,
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         use_sde: bool = False,
         log_std_init: float = -3,
         use_expln: bool = False,
@@ -486,6 +492,7 @@ class MultiInputPolicy(SACPolicy):
             lr_schedule,
             net_arch,
             activation_fn,
+            out_act_fn,
             use_sde,
             log_std_init,
             use_expln,

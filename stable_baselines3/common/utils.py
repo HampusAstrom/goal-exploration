@@ -203,6 +203,7 @@ def configure_logger(
         if not reset_num_timesteps:
             # Continue training in the same directory
             latest_run_id -= 1
+            # TODO maybe we should purge file here if not continuing?
         save_path = os.path.join(tensorboard_log, f"{tb_log_name}_{latest_run_id + 1}")
         if verbose >= 1:
             format_strings = ["stdout", "tensorboard"]

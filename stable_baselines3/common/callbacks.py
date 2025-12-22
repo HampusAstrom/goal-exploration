@@ -524,6 +524,7 @@ class EvalCallback(EventCallback):
             self.logger.record("eval/"+self.log_name+"_mean_ep_length", mean_ep_length)
             self.logger.record("eval/"+self.log_name+"_mean_initial_values", mean_initial_values)
             self.logger.record("eval/"+self.log_name+"_mean_episode_disc_rewards", mean_episode_disc_rewards)
+            self.logger.record("eval/"+self.log_name+"_mean_v_overestimate", mean_initial_values-mean_episode_disc_rewards)
 
             if len(self._is_success_buffer) > 0:
                 success_rate = np.mean(self._is_success_buffer)
@@ -700,7 +701,7 @@ class StopTrainingOnNoModelImprovement(BaseCallback):
 
         return continue_training
 
-class MetaEvalCallback(EventCallback):
+class MetaEvalCallback(BaseCallback):
     """
     Runs meta analysis on data in parent or object and outputs extra meta_eval/
     to the logger
@@ -724,14 +725,17 @@ class MetaEvalCallback(EventCallback):
                  log_on_end_only: bool = False,
                  obj: Any = None, # override if not using data from parent
                  callback: Optional[BaseCallback] = None,
+                 slice_of_cb_list: slice = np.s_[:],
+                 eval_freq: float = None,
                  verbose: int = 0,
                  ):
-        super().__init__(callback=callback, verbose=verbose)
+        super().__init__(verbose=verbose)
         self.eval_func = eval_func
         if isinstance(vars_to_eval, str):
             self.vars_to_eval = [vars_to_eval]
         else:
             self.vars_to_eval = vars_to_eval
+        self.callback = callback
         self.window = window
         self.log_name = log_name
         self.log_val = log_val
@@ -740,6 +744,8 @@ class MetaEvalCallback(EventCallback):
         self.init_obj = obj
         self.log_on_end_only = log_on_end_only
         self.last_func_ret = None
+        self.slice_of_cb_list = slice_of_cb_list
+        self.eval_freq = eval_freq
 
         self.values = []
         self.last_values = None
@@ -764,6 +770,10 @@ class MetaEvalCallback(EventCallback):
             log_path = os.path.join(log_path, "meta_evaluations")
         self.log_path = log_path
 
+    def set_obj(self, obj) -> None:
+        self.init_obj = obj # for when before _init_callback
+        self.obj = obj # for when after _init_callback
+
     def _init_callback(self) -> None:
         # can be passed object to use intead of parent, must happen here,
         # as linking cannot be assume done before _init_callback
@@ -779,16 +789,39 @@ class MetaEvalCallback(EventCallback):
 
     def _on_step(self) -> bool:
         assert self.obj is not None, "``MetaEvalCallback`` callback must be used with an object to get data from"
-        continue_training = True
-        logged_anything = False
+
+        if self.eval_freq != None and self.eval_freq > 0 and self.n_calls % self.eval_freq != 0:
+            return True # if used, don't measure if n_calls not a multipe of eval_freq
 
         # get data from parent/object
         latest_vals = []
         for var in self.vars_to_eval:
-            latest_vals.append(getattr(self.obj, var))
+            # TODO make sure this callback runs once, after the last eval we care about
+            if isinstance(self.obj, CallbackList):
+                callbacks = getattr(self.obj, "callbacks")
+                # maybe only grab some of the stats in the callback list
+                callbacks = callbacks[self.slice_of_cb_list]
+                per_cb_vals = []
+                for cb in callbacks:
+                    per_cb_vals.append(getattr(cb, var))
+                latest_vals.append(per_cb_vals)
+            else:
+                latest_vals.append(getattr(self.obj, var))
 
         self.values.append(latest_vals)
         self.last_values = latest_vals
+
+        if not self.log_on_end_only:
+            return self.func_eval()
+        else:
+            return True
+
+    def func_eval(self, is_end=False):
+        continue_training = True
+        logged_anything = False
+
+        log_now = (not self.log_on_end_only and not is_end) or \
+                  (self.log_on_end_only and is_end)
 
         if self.window is not None:
             window = min(len(self.values), self.window)
@@ -806,7 +839,7 @@ class MetaEvalCallback(EventCallback):
         # TODO do np.savez stuff if used (if log_dir)
 
         # log
-        if self.log_val and not self.log_on_end_only:
+        if self.log_val and log_now:
             self.logger.record(self.log_name, func_ret)
             logged_anything = True
 
@@ -815,7 +848,7 @@ class MetaEvalCallback(EventCallback):
             if (self.step_of_bool == "-" and step < self.best_step_where_true) or \
                (self.step_of_bool != "-" and step > self.best_step_where_true):
                 self.best_step_where_true = step
-                if not self.log_on_end_only:
+                if log_now:
                     word = "first" if self.step_of_bool == "-" else "last"
                     self.logger.record(self.log_name+f"_{word}_true_at_step", self.best_step_where_true)
                     logged_anything = True
@@ -826,7 +859,7 @@ class MetaEvalCallback(EventCallback):
                (self.log_best != "-" and func_ret > self.best_val):
                 self.best_val = func_ret
                 self.best_step = step
-                if not self.log_on_end_only:
+                if log_now:
                     self.logger.record(self.log_name+"_best", self.best_val)
                     self.logger.record(self.log_name+"_best_at_step", self.best_step)
                     logged_anything = True
@@ -858,6 +891,7 @@ class MetaEvalCallback(EventCallback):
             logged_anything = True
 
         if self.log_on_end_only:
+            self.func_eval() # do eval once
             if self.log_val:
                 self.logger.record(self.log_name, self.last_func_ret)
                 logged_anything = True

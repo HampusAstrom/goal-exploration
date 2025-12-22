@@ -7,6 +7,8 @@ import re
 from goal_wrapper import FiveXGoalSelection
 import scipy.stats as stats
 
+import wandb
+
 a = [[1, 0],
      [0, 1],
      [-1, 0],
@@ -308,18 +310,103 @@ print(*both, sep='\n')
 
 print()
 
+a = [1, 2, 3]
+b = ["a", "b", "c"]
 
-a = "testing"
-b = "testy"
-c, d = utils.first_unique(a,b)
-print(c + " " + d)
+c = [[1, "a"], [2, "b"], [3, "c"]]
+zipped = zip(c)
+print(list(zipped))
+zipped = zip(*c)
+print(list(zipped))
 
-a = "testing"
-b = "te"
-c, d = utils.first_unique(a,b)
-print(c + " " + d)
+a = np.array([[1, 2], [3, 4]])
+print(np.argmax(a))
+a[0,0] = 4
+print(np.argmax(a))
 
-a = "taste"
-b = "tea"
-c, d = utils.first_unique(a,b)
-print(c + " " + d)
+print("testing meta_eval_reward_quick_and_no_v_explode")
+
+rew = [-1000, -1000, -1000, -1000]
+init_v = [-1000, -1000, -1000, -1000]
+steps = [1, 2, 3, 4]
+max_steps = [4, 4, 4, 4]
+
+window = 2
+
+values = list(zip(rew, init_v, steps, max_steps))
+meta_reward = utils.meta_eval_reward_quick_and_no_v_explode(values, rew_window=window)
+print(values)
+print(meta_reward)
+print()
+
+init_v[2] = 100
+values = list(zip(rew, init_v, steps, max_steps))
+meta_reward = utils.meta_eval_reward_quick_and_no_v_explode(values, rew_window=window)
+print(values)
+print(meta_reward)
+print()
+
+init_v[2] = -100
+rew[1] = -110
+values = list(zip(rew, init_v, steps, max_steps))
+meta_reward = utils.meta_eval_reward_quick_and_no_v_explode(values, rew_window=window)
+print(values)
+print(meta_reward)
+print()
+
+rew[2] = -100
+values = list(zip(rew, init_v, steps, max_steps))
+meta_reward = utils.meta_eval_reward_quick_and_no_v_explode(values, rew_window=window)
+print(values)
+print(meta_reward)
+print()
+
+init_v[0] = 100
+values = list(zip(rew, init_v, steps, max_steps))
+meta_reward = utils.meta_eval_reward_quick_and_no_v_explode(values, rew_window=window)
+print(values)
+print(meta_reward)
+print()
+
+
+print(utils.obj2shortstr(10))
+print(utils.obj2shortstr(-10))
+print(utils.obj2shortstr(9))
+print(utils.obj2shortstr(-999))
+print(utils.obj2shortstr(-1.056))
+print(utils.obj2shortstr(-0.00005))
+print(utils.obj2shortstr(0.01))
+print(utils.obj2shortstr(0.001))
+print(utils.obj2shortstr(0.1))
+print(utils.obj2shortstr(0.9))
+print(utils.obj2shortstr(-0.9))
+
+a = np.array(range(9)).reshape(3,3)
+print(a)
+
+sl = np.s_[0::2]
+
+b = a[1,sl]
+print(b)
+
+b = a[:,sl]
+print(b)
+
+success_rate = [[0,0],[0,0.5],[1,1]]
+init_v = [[0,0],[0.8,0.1],[0.3,0.2]]
+dfr    = [[0,0],[0.2,0.1],[0.3,0.2]]
+
+print(list(zip(success_rate, init_v, dfr)))
+
+values = list(zip(success_rate, init_v, dfr))
+
+ret = utils.meta_eval_goals(values)
+print(ret)
+
+dct = {"double_dqn": True, "use_sde": True}
+algo = "SAC"
+utils.filter_algo_kwargs_by_algo(dct, algo)
+print(dct)
+
+#algo = SAC
+#algo_kwargs_merged["policy_kwargs"]["double_dqn"] = True

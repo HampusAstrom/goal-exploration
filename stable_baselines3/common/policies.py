@@ -930,6 +930,7 @@ class ContinuousCritic(BaseModel):
         features_extractor: BaseFeaturesExtractor,
         features_dim: int,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        out_act_fn: Optional[Type[nn.Module]] = None,
         normalize_images: bool = True,
         n_critics: int = 2,
         share_features_extractor: bool = True,
@@ -948,7 +949,10 @@ class ContinuousCritic(BaseModel):
         self.q_networks = []
         for idx in range(n_critics):
             q_net = create_mlp(features_dim + action_dim, 1, net_arch, activation_fn)
-            q_net = nn.Sequential(*q_net)
+            if out_act_fn is not None: # use nn.Sigmoid() for GCRL
+                q_net = nn.Sequential(*q_net, out_act_fn)
+            else:
+                q_net = nn.Sequential(*q_net)
             self.add_module(f"qf{idx}", q_net)
             self.q_networks.append(q_net)
 

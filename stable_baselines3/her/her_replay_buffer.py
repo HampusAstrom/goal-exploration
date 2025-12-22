@@ -338,7 +338,7 @@ class HerReplayBuffer(DictReplayBuffer):
             # based on sequences of goals
             # should only matter if real rollouts don't terminate at goals
             # here we assume positive rewards means it should terminate
-            new_dones = (rewards.flatten() > 0) * 1.0
+            new_dones = rewards.flatten() > 0
             dones = np.maximum(dones, new_dones)
             # TODO replace with change in compute reward instead or not?
 
@@ -421,7 +421,7 @@ class HerReplayBuffer(DictReplayBuffer):
         if self.terminate_at_goal:
             # if we expect it to terminate at goals, it needs to do so in hindsight too
             # here we assume positive rewards means it should terminate
-            new_dones = (rewards.flatten() > 0) * 1.0
+            new_dones = rewards.flatten() > 0
             dones = np.maximum(dones, new_dones)
             # TODO replace with change in compute reward instead or not?
 

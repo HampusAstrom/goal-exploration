@@ -11,7 +11,7 @@ import wandb.sdk.launch
 import wandb.sdk.launch.sweeps
 import wandb.sdk.launch.sweeps.utils
 
-from goal_wrapper_run import train, confirm
+from goal_wrapper_run import train, confirm, algo_for_env
 import utils
 
 def nested_dict2sweep_params(dct):
@@ -29,33 +29,47 @@ def nested_dict2sweep_params(dct):
 
 def get_past_runs(sweep_ids = None,
                   entity = "hampus-astrom-lund-university",
-                  project = "MountainCar-v0|max_episode_steps[1000]|test_run"):
+                  project = "MountainCar-v0|max_episode_steps[1000]|test_run",
+                  metric = "meta_eval/goal_success_rate_punish_expode",
+                  ):
     api = wandb.Api()
     # filters = {"state": "finished"}
     # all_groups_runs = api.runs(entity + "/" + project,
     #                            filters = filters,
     #                            per_page = 50,
     #                            )
-    sweeps = api.project(name=project, entity=entity).sweeps()
 
-    ids_per_sweep = {}
-    # Iterate over sweeps and print details
-    for sweep in sweeps:
-        if sweep_ids is None or sweep.id in sweep_ids:
-            print(f"Sweep name: {sweep.name}")
-            print(f"Sweep ID: {sweep.id}")
-            print(f"Sweep URL: {sweep.url}")
-            print("----------")
+    filters = {"state": "finished",
+               metric: {"$exists": True},
+               #"baseline_override": {"$in": []}
+               }
+    runs = api.runs(path=entity+"/"+project, filters=filters)
 
-            filters = {"state": "finished"}
-            runs = sweep.runs
-            ids = []
-            for run in runs:
-                if run.state == "finished":
-                    ids.append(run.id)
-            ids_per_sweep[sweep.id] = ids
+    ids = []
+    for run in runs:
+        ids.append(run.id)
 
-    return ids_per_sweep
+    return {"all": ids}
+
+    # sweeps = api.project(name=project, entity=entity).sweeps()
+
+    # ids_per_sweep = {}
+    # # Iterate over sweeps and print details
+    # for sweep in sweeps:
+    #     if sweep_ids is None or sweep.id in sweep_ids:
+    #         print(f"Sweep name: {sweep.name}")
+    #         print(f"Sweep ID: {sweep.id}")
+    #         print(f"Sweep URL: {sweep.url}")
+    #         print("----------")
+
+    #         runs = sweep.runs
+    #         ids = []
+    #         for run in runs:
+    #             if run.state == "finished":
+    #                 ids.append(run.id)
+    #         ids_per_sweep[sweep.id] = ids
+
+    # return ids_per_sweep
 
 
 def main():
@@ -84,7 +98,7 @@ goal_conf_to_permute = dict(
     dist_decay=[2],
 )
 
-env_id = "MountainCar-v0" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
+env_id = "SparsePendulumEnv-v1" # "MountainCar-v0" # "Acrobot-v1" # "MountainCar-v0" "CliffWalking-v0" "PathologicalMountainCar-v1.1" # "FrozenLake-v1" "PathologicalMountainCar-v1.1" "SparsePendulumEnv-v1"
 # TODO get updated gym envs with cliffwalking v1
 
 env_params_override = dict(
@@ -140,24 +154,63 @@ parameters=utils.deepcopy(default_parameters)
 # non-deep copies for easy access past extra layers:
 algo_kwargs=parameters["algo_kwargs"]["parameters"]
 policy_kwargs=algo_kwargs["policy_kwargs"]["parameters"]
+goal_selection_params=parameters["goal_selection_params"]["parameters"] # shouldn't matter for base
 #env_params_override=parameters["env_params_override"]["parameters"] # don't touch for now
-#goal_selection_params=parameters["goal_selection_params"]["parameters"] # shouldn't matter for base
 
 # just remember to replace entire dict entry under key, as there is a value/values there now
-policy_kwargs["net_arch"] = dict(values=[[80], [32, 32], [64, 64], [128, 128],])
+# policy_kwargs["net_arch"] = dict(values=[[80], [32, 32], [64, 64], [128, 128],])
+# algo_kwargs["exploration_fraction"] = dict(min=0.0, max=1.0, distribution="uniform")
+# algo_kwargs["exploration_initial_eps"] = dict(min=0.0, max=1.0, distribution="uniform")
+# algo_kwargs["exploration_final_eps"] = dict(min=0.0, max=1.0, distribution="uniform")
+# algo_kwargs["learning_rate"] = dict(min=5e-5, max=5e-3,)
+# algo_kwargs["batch_size"] = dict(values=[64, 128, 256, 512])
+# algo_kwargs["buffer_size"] = dict(min=5_000, max=1_000_000)
+# algo_kwargs["train_freq"] = dict(min=1, max=300) # needs better prior or dist
+# algo_kwargs["learning_starts"] = dict(min=1000, max=50_000)
+# algo_kwargs["target_update_interval"] = dict(min=10, max=5000)
+#algo_kwargs["tau"] = dict(min=0.1, max=1.0)
+# try tau later too
+
+parameters["n_sampled_goal"] = dict(min=0, max=100)
+parameters["baseline_override"] = dict(values=["uniform-goal", "grid-novelty"])
+parameters["range_as_goal"] = dict(value=True)
+
+policy_kwargs["net_arch"] = dict(values=[[64, 64], [128, 128],[128, 128, 128], [256, 256], [256, 256, 256]])
+
 algo_kwargs["exploration_fraction"] = dict(min=0.0, max=1.0, distribution="uniform")
 algo_kwargs["exploration_initial_eps"] = dict(min=0.0, max=1.0, distribution="uniform")
 algo_kwargs["exploration_final_eps"] = dict(min=0.0, max=1.0, distribution="uniform")
 algo_kwargs["learning_rate"] = dict(min=5e-5, max=5e-3,)
-algo_kwargs["batch_size"] = dict(values=[64, 128, 256, 512])
+algo_kwargs["batch_size"] = dict(values=[64, 128, 256, 512, 1024, 2048])
 algo_kwargs["buffer_size"] = dict(min=5_000, max=1_000_000)
 algo_kwargs["train_freq"] = dict(min=1, max=300) # needs better prior or dist
-algo_kwargs["learning_starts"] = dict(min=1000, max=50_000)
+algo_kwargs["learning_starts"] = dict(min=1000, max=100_000)
 algo_kwargs["target_update_interval"] = dict(min=10, max=5000)
-#algo_kwargs["tau"] = dict(min=0.1, max=1.0)
-# try tau later too
+algo_kwargs["tau"] = dict(min=0.01, max=1.0)
+
+goal_selection_params["fraction_random"] = dict(min=0, max=1, distribution="uniform")
+goal_selection_params["dist_decay"] = dict(min=1, max=4)
 
 base_path = "./output/wrapper/"
+
+# check so that all envs use same algo
+if "values" in parameters["env_id"]:
+    algos = set()
+    for env_id in parameters["env_id"]["values"]:
+        algos.add(algo_for_env(env_id))
+    if len(algos) > 1:
+        raise ValueError("Listed environments need different algorithms!")
+    algo = algos.pop()
+elif "value" in parameters["env_id"]:
+    algo = algo_for_env(parameters["env_id"])
+else:
+    raise ValueError("No or wrongly listed env_id")
+
+pprint(parameters)
+
+utils.filter_algo_kwargs_by_algo(parameters, algo)
+
+pprint(parameters)
 
 # TODO sort up loose params here
 window = 10
@@ -165,8 +218,8 @@ window = 10
 sweep_conf=dict(
     method="bayes",
     metric=dict(
-        name="meta_eval/meta_value", # f"meta_eval/avg_reward_for_{window}_evals_best",
-        goal="miminize", # maximize
+        name="meta_eval/goal_success_rate_punish_expode", # "meta_eval/meta_value"
+        goal="maximize", # maximize
         # could add target here
     ),
     # TODO insert params_to_permute here, converted to non-single values
@@ -178,8 +231,6 @@ sweep_conf=dict(
 # break out all param pre-processing from goal_wrapper_run to separate funtion
 # that can be called here and in goal_wrapper_run
 # then we can get it to run correctly
-
-# TODO also try to see if I can update and continnue sweep instead of restarting?
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

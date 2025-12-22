@@ -151,8 +151,16 @@ def evaluate_policy(
     for episode in range(np.max(episode_count_targets)):
         init_obs, _ = model.policy.obs_to_tensor(observations)
         with th.no_grad():
-            q_values = model.q_net.forward(init_obs).cpu().numpy()
-        initial_values.append(np.max(q_values, 1))
+            if hasattr(model, "q_net"): # assume DQN for now...
+                # TODO ask Davide if it's best to grab initial V from active or target Q/critic
+                q_values = model.q_net.forward(init_obs).cpu().numpy()
+                initial_values.append(np.max(q_values, 1))
+            elif hasattr(model, "critic"): # assume SAC for now...
+                actions_pi = model.actor.forward(init_obs, deterministic=True)
+                q_values = th.cat(model.critic_target(init_obs, actions_pi), dim=1)
+                q_values, _ = th.min(q_values, dim=1, keepdim=True)
+                # we haven't added entropy here, should we? TODO ask Davide
+                initial_values.append(np.max(q_values.cpu().numpy(), 1))
 
     initial_values = np.array(initial_values)
 

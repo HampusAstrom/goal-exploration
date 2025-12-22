@@ -18,9 +18,80 @@ from typing import List, Any, Callable, Dict, Optional, Union
 from scipy.ndimage import gaussian_filter
 import scipy.stats as stats
 
+from stable_baselines3 import SAC, DQN # just for typing
+from stable_baselines3.common.base_class import BaseAlgorithm # just for typing
+
 eval_freq = 0
 
+# def pp(obj):
+#     if isinstance(obj, [])
+
 # Helper functions for derivative logs
+
+# TODO function that can be used on a dict type situation, we want to check
+# goal success rate over time, and initial_v vs real discounted reward for those
+# runs. To get an average goal reward (with windowing?, and before or after average?
+# does the order even matter, it's just two averages?), as well as checking if
+# the intial V is much higher than real discounted reward, if that makes sense
+# as a check for explosions?
+
+def meta_eval_goals(values: List[List[List[Any]]],
+                    weights: List[float] = [1, 1],
+                    dft_range_backup: float = 5e-2,
+                    grace_range: float = 5,
+                    ):
+
+    # values should be 3D now
+    # 1st dim time, 2nd dim variable, 3rd dim callback in list
+    # we want to reward:
+    # high goal success rate, all the time
+    # getting good fast (but average over all steps will capture that)
+    # no unreasonably large initial V (as compared to real discounted reward for goal)
+    # for V vs J? we should really make sure that it's the same start obs!
+    # stability? should we punish unstable individual goal performance? no for now
+
+    # assume following values in 2nd dim:
+    # values[:,0,:] last_mean_reward (goal success rate at each step in this case)
+    # values[:,1,:] last_mean_initial_values
+    # values[:,2,:] last_mean_episode_disc_rewards
+    # values[:,3,:] step        not used for now
+    # values[:,5,:] max_steps   not used for now
+
+    values = np.array(values)
+
+    mean_success_rate = np.mean(values[:,0,:])
+
+    initial_V = values[:,1,:]
+    dfr = values[:,2,:]
+    max_dfr = np.max(dfr, axis=0) # max (in time) for each goal
+    # min_drf = np.min(dfr, axis=0) # min (in time) for each goal
+    min_drf = 0 # we know min of 0 is reasonable for GC
+    dfr_range = max_dfr-min_drf
+    #max_dfr_over_goals = np.max(max_dfr)
+    #min_range = np.max([dft_range_backup, max_dfr_over_goals])
+    min_range = dft_range_backup # if no success, assume dfr would be dfr_range_backup (0.05 default)
+    dfr_range[dfr_range==0] = min_range # avoid dividing by 0
+    # if init_v is twice as high as max_dft (compared to min_dfr) start punishing
+    # with scale of 0-1 for range*grace_range
+    # so 0 at max*grace_range and 0.8 at max*grace_range+0.8*dfr_range lets say
+    explode_per_step = np.maximum(0, initial_V-max_dfr*grace_range)/dfr_range
+    #explode = np.max(explode_per_step, axis=0) # max over time, one for each goal
+    # initial_v starts high, so for now we only punish if initial_v is high on last step
+    explode = explode_per_step[-1]
+    explode[explode>1] = 1 # cap explode value per dim to 1
+    # need to see if this is too harsh? now max is from data, not hardcoded...
+    # how to we handle explosions on some goals, average, or worst, or?
+    punish_explode = np.mean(explode)
+
+    # option: do we want step of best window over average goal success rate too?
+    # option: do we care extra about lowest success rate, but what it impossible?
+    # option: do we want to do somethings here to handle differing discounts of
+    # goals due to differing optimal steps to solve?
+
+    # TODO this must include some cost to how long it takes to train
+    # we can't treat runs in 30 min equal to those in 5h!
+
+    return (mean_success_rate*weights[0]+(1-punish_explode)*weights[1])/np.sum(weights)
 
 def meta_eval_reward_quick_and_no_v_explode(values,
                                             rew_window=10,
@@ -102,6 +173,77 @@ def check_threshold(vals,
         return False
 
 # end of helper functions for derivative logs
+
+# intended to work for both when making model with algo, and with conf for wandb
+def filter_algo_kwargs_by_algo(dct: dict, algo: Union[str,BaseAlgorithm]):
+    # TODO automate populating these lists, at least run a script to grab
+    specs = {"DQN": ["double_dqn",
+                     "exploration_fraction",
+                     "exploration_initial_eps",
+                     "exploration_final_eps",
+                     "max_grad_norm",
+                     ],
+             "SAC": ["use_sde",
+                     "sde_sample_freq",
+                     "use_sde_at_warmup",
+                     "log_std_init",
+                     "use_expln",
+                     "clip_mean",
+                     "n_critics",
+                     "share_features_extractor",
+                     "action_noise",
+                     "ent_coef",
+                     "target_entropy",
+                    ],
+             }
+    if algo == DQN:
+        algo = "DQN"
+    elif algo == SAC:
+        algo = "SAC"
+
+    if algo not in specs.keys():
+        raise ValueError(f"algo: {algo} not in list")
+
+    skip_list = []
+    keep = specs[algo]
+    for key, lst in specs.items():
+        if algo == key:
+            continue
+        for string in lst:
+            if string not in keep: # same can be in two
+                skip_list.append(string)
+
+    # doing in place changes for now
+    def recursive_filter(dct: dict):
+        for key in list(dct.keys()):
+            # if match, remove
+            if key in skip_list:
+                del dct[key]
+                continue
+
+            # if dict that didn't match recursive
+            if isinstance(dct[key], dict):
+                recursive_filter(dct[key])
+
+    recursive_filter(dct)
+    return dct
+
+
+def get_nested_structure_of_callbacks(obj):
+    dct = {}
+    dct["class"] = obj.__class__
+    dct["id"] = id(obj)
+    if hasattr(obj, "callbacks"):
+        dct["callbacks"] = get_nested_structure_of_callbacks(getattr(obj, "callbacks"))
+    if hasattr(obj, "callback"):
+        dct["callback"] = get_nested_structure_of_callbacks(getattr(obj, "callback"))
+    if isinstance(obj, list):
+        lst = []
+        for inst in obj:
+            lst.append(get_nested_structure_of_callbacks(inst))
+        dct["list"] = lst
+
+    return dct
 
 def replace_type_in_dict_from(dct1: dict, dct2: dict, type=list, sort=True):
     if sort: # assure sorted dict while we are looping deeply
